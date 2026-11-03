@@ -79,6 +79,7 @@ final class BubbleController {
     private let onClose: () -> Void
     private var anchor = NSRect.zero
     private var lastSize = NSSize.zero
+    private var lastPlacement: BubblePlacement?
 
     init(model: AppModel, sessionId: String?, single: Bool, onClose: @escaping () -> Void) {
         self.selection = BubbleSelection(sessionId)
@@ -99,17 +100,26 @@ final class BubbleController {
 
     func retarget(_ sid: String) { selection.switchTo(sid) }
 
-    func follow(_ sprite: NSRect) {
-        guard sprite != anchor || panel.frame.size != lastSize else { return }
+    func follow(_ sprite: NSRect, placement: BubblePlacement? = nil) {
+        guard sprite != anchor || panel.frame.size != lastSize || placement != lastPlacement else { return }
+        lastPlacement = placement
         let moved = anchor != .zero && sprite.origin != anchor.origin
         anchor = sprite
         lastSize = panel.frame.size
         let screen = NSScreen.screens.first { $0.frame.intersects(sprite) }?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
         let size = panel.frame.size
         var x = sprite.midX - size.width / 2
-        x = min(max(x, screen.minX + 4), screen.maxX - size.width - 4)
         var y = sprite.maxY + 4
-        if y + size.height > screen.maxY { y = max(screen.minY, sprite.minY - size.height - 4) }
+        switch placement {
+        case .left, .right:
+            x = placement == .left ? sprite.minX - size.width - 4 : sprite.maxX + 4
+            y = min(max(sprite.midY - size.height / 2, screen.minY), screen.maxY - size.height)
+        case .below:
+            y = max(screen.minY, sprite.minY - size.height - 4)
+        case .above, nil:
+            if y + size.height > screen.maxY { y = max(screen.minY, sprite.minY - size.height - 4) }
+        }
+        x = min(max(x, screen.minX + 4), screen.maxX - size.width - 4)
         panel.setFrameOrigin(NSPoint(x: x, y: y))
         // A moving card must not take a click aimed at something else (review S2).
         if moved { selection.disarm() }

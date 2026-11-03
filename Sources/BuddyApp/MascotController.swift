@@ -28,16 +28,22 @@ final class MascotController {
     private var finishedKey: String?
     private var wanderIn = Double.random(in: 3...8)
     private var current: RenderedFrame?
+    private var sliding = false
     private var bubble: BubbleController?
+    private var position: (n: Int, of: Int)?
 
     var model: AppModel { director.model }
     private var scale: CGFloat { model.pointScale }
     private var spriteSize: CGFloat { 32 * scale }
     private var tagHeight: CGFloat { CGFloat(model.size.tagFontSize) + 8 }
-    private var panelSize: NSSize { NSSize(width: max(spriteSize, 100 + 10 * CGFloat(model.size.factor)), height: spriteSize + tagHeight + 4) }
+    var panelSize: NSSize { NSSize(width: max(spriteSize, 100 + 10 * CGFloat(model.size.factor)), height: spriteSize + tagHeight + 4) }
     var centerX: CGFloat { x + panelSize.width / 2 }
     /// Walking, dragged, or walking off: needs the fast tick.
-    var isMoving: Bool { dragging || walkTarget != nil || (isLeaving && goodbyeDone) }
+    var isMoving: Bool { dragging || walkTarget != nil || (isLeaving && goodbyeDone) || offSlot }
+    /// Still holds its place in a group: a leaving mascot keeps it until its goodbye ends.
+    var holdsSlot: Bool { !isLeaving || !goodbyeDone }
+    private var slot: NSPoint? { isLeaving ? nil : director.slot(for: self) }
+    private var offSlot: Bool { slot.map { abs($0.x - x) > 0.5 || abs($0.y - y) > 0.5 } ?? false }
     private var spriteScreenRect: NSRect {
         NSRect(x: x + (panelSize.width - spriteSize) / 2, y: y + tagHeight + 4, width: spriteSize, height: spriteSize)
     }
@@ -99,15 +105,21 @@ final class MascotController {
         sprite.onDragBegan = { [weak self] in
             guard let self else { return }
             dragging = true; walkTarget = nil; dragOrigin = NSPoint(x: x, y: y)
+            if director.grouped { director.beginGroupDrag() }
             director.wake()
         }
         sprite.onDrag = { [weak self] d in
             guard let self else { return }
+            if director.grouped { director.dragGroup(by: d); return }
             x = dragOrigin.x + d.x; y = dragOrigin.y + d.y
         }
-        sprite.onDrop = { [weak self] in self?.dragging = false; self?.pinned = true }
-        sprite.onDoubleClick = { [weak self] in
+        sprite.onDrop = { [weak self] in
             guard let self else { return }
+            dragging = false
+            if director.grouped { director.endGroupDrag() } else { pinned = true }
+        }
+        sprite.onDoubleClick = { [weak self] in
+            guard let self, !director.grouped else { return }
             pinned = false; y = director.floor.minY
         }
         sprite.onMenu = { [weak self] p in self?.showMenu(at: p) }
@@ -120,8 +132,7 @@ final class MascotController {
         tag.stringValue = new.label
         badge.isHidden = new.badge == 0
         badge.stringValue = "\(new.badge)"
-        let count = new.badge > 0 ? ", \(new.badge) waiting" : ""
-        sprite.setAccessibilityLabel("Buddy for \(new.label), \(new.sleeping ? "sleeping" : new.state.label)\(count)")
+        updateLabel()
         sprite.setAccessibilityHelp("Press to open the bubble. Use the actions menu for more.")
         if sessionChanged, let sid = new.sessionId { bubble?.retarget(sid) }
         if new.state == .ended { leave(); return }
@@ -129,6 +140,27 @@ final class MascotController {
         finishedKey = nil
         cardChanged()
     }
+
+    private func updateLabel() {
+        let count = spec.badge > 0 ? ", \(spec.badge) waiting" : ""
+        let place = position.map { ", position \($0.n) of \($0.of)" } ?? ""
+        sprite.setAccessibilityLabel("Buddy for \(spec.label), \(spec.sleeping ? "sleeping" : spec.state.label)\(count)\(place)")
+    }
+
+    func setPosition(_ n: Int?, of total: Int) {
+        let new = n.map { (n: $0, of: total) }
+        guard new?.n != position?.n || new?.of != position?.of else { return }
+        position = new
+        updateLabel()
+    }
+
+    /// Group handed back to free mode: a mascot off the floor stays where it is.
+    func leaveGroup() {
+        if y > director.floor.minY + 1 { pinned = true }
+        setPosition(nil, of: 0)
+    }
+
+    func setY(_ v: CGFloat) { y = v }
 
     private func isCrowded() -> Bool {
         director.controllers.values.contains { $0 !== self && abs($0.centerX - centerX) < spriteSize }
@@ -143,7 +175,7 @@ final class MascotController {
             let wasOpen = bubble != nil
             showBubble(focus: false)
             if !wasOpen { Announcer.say("\(s.projectName): \(p.kind == .question ? "Claude has a question" : "\(p.toolName) needs permission")") }
-        } else if spec.state.needsAttention, isCrowded(), !model.reduceMotion {
+        } else if spec.state.needsAttention, !director.grouped, isCrowded(), !model.reduceMotion {
             walkTarget = director.freeX(width: spriteSize, excluding: self) - panelSize.width / 2
             director.wake()
         }
@@ -159,8 +191,12 @@ final class MascotController {
                 self?.bubble = nil
             }
         }
-        bubble?.follow(spriteScreenRect)
+        followBubble()
         bubble?.show(focus: focus)
+    }
+
+    private func followBubble() {
+        bubble?.follow(spriteScreenRect, placement: director.bubblePlacement(for: spriteScreenRect))
     }
 
     private func toggleBubble() {
@@ -195,10 +231,15 @@ extension MascotController {
         move(dt: dt, others: others)
         animate(dt: dt)
         if panel.frame.origin != NSPoint(x: x, y: y) { panel.setFrameOrigin(NSPoint(x: x, y: y)) }
-        bubble?.follow(spriteScreenRect)
+        followBubble()
     }
 
     private func move(dt: Double, others: [MascotController]) {
+        if let slot {
+            walkTarget = nil
+            follow(slot: slot, dt: dt)
+            return
+        }
         guard !dragging else { return }
         if isLeaving && goodbyeDone && walkTarget == nil {
             let f = director.floor
@@ -222,6 +263,17 @@ extension MascotController {
         if (dir > 0 && x >= target) || (dir < 0 && x <= target) { arrive(at: target) }
     }
 
+    private func follow(slot: NSPoint, dt: Double) {
+        let dx = slot.x - x, dy = slot.y - y
+        let dist = hypot(dx, dy)
+        let step = walkSpeed * 3 * CGFloat(dt)
+        if director.isGroupDragging || model.reduceMotion || dist <= step { x = slot.x; y = slot.y; sliding = false; return }
+        x += dx / dist * step
+        y += dy / dist * step
+        sliding = abs(dx) > 0.5
+        if sliding { facingLeft = dx < 0 }
+    }
+
     private func arrive(at target: CGFloat) {
         x = target
         walkTarget = nil
@@ -242,7 +294,7 @@ extension MascotController {
     func chain() -> [String] {
         if dragging { return ["dragged"] }
         if isLeaving { return goodbyeDone ? ["walk"] : ["goodbye"] }
-        if walkTarget != nil { return ["walk"] }
+        if walkTarget != nil || (sliding && offSlot) { return ["walk"] }
         if spec.sleeping { return ["sleep"] }
         switch spec.state {
         case .working: return ["working"]
@@ -319,13 +371,14 @@ extension MascotController {
         menu.addItem(ActionItem("Move to left edge") { [weak self] in self?.moveToEdge(left: true) })
         menu.addItem(ActionItem("Move to right edge") { [weak self] in self?.moveToEdge(left: false) })
         menu.addItem(ActionItem("Jump to session") { [weak self] in self?.model.jump(sid) })
-        if pinned { menu.addItem(ActionItem("Unpin") { [weak self] in self?.pinned = false; self?.y = self?.director.floor.minY ?? 0 }) }
+        if pinned, !director.grouped { menu.addItem(ActionItem("Unpin") { [weak self] in self?.pinned = false; self?.y = self?.director.floor.minY ?? 0 }) }
         menu.addItem(ActionItem("Hide this buddy") { [weak self] in self?.model.setHidden(sid, true) })
         menu.popUp(positioning: nil, at: point, in: sprite)
     }
 
     /// Keyboard/VoiceOver alternative to dragging (WCAG 2.5.7).
     private func moveToEdge(left: Bool) {
+        if director.grouped { director.moveGroupToEdge(left: left); return }
         let f = director.floor
         x = left ? f.minX : f.maxX - panelSize.width
         walkTarget = nil

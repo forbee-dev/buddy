@@ -8,6 +8,10 @@
 4. Check the DMG: `hdiutil attach -nobrowse build/Buddy-<version>.dmg`, look at the contents, then `hdiutil detach`.
 5. Share the DMG. Users follow [INSTALL.md](INSTALL.md) ("Team install").
 
+## Local dev install
+
+`scripts/install-local.sh` builds and installs a local build into `/Applications` (see [INSTALL.md](INSTALL.md)). It moves the old app to the Trash. It does not make a DMG and does not notarize.
+
 ## Signing identity
 
 `scripts/sign-identity.sh` picks the identity, in this order:

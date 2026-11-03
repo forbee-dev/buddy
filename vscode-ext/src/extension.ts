@@ -18,6 +18,13 @@ async function listTerminals(): Promise<{ shellPid: number; name: string; term: 
 
 const publicList = (l: { shellPid: number; name: string }[]) => l.map(({ shellPid, name }) => ({ shellPid, name }));
 
+/** Absolute fsPaths of the window's folders, capped to the protocol limits. */
+const workspaceFolders = (): string[] =>
+  (vscode.workspace.workspaceFolders ?? [])
+    .map((f) => f.uri.fsPath)
+    .filter((p) => p.length <= 1024)
+    .slice(0, 20);
+
 export function activate(ctx: vscode.ExtensionContext): void {
   const out = vscode.window.createOutputChannel("Buddy");
   const log = (m: string) => out.appendLine(`${new Date().toISOString()} ${m}`);
@@ -47,8 +54,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
       kind: "ext-hello",
       editor: vscode.env.appName.includes("Cursor") ? "cursor" : "vscode",
       appPid: process.pid,
-      version: "0.1.1",
+      version: "0.1.2",
       terminals: publicList(await refresh()),
+      workspaceFolders: workspaceFolders(),
     }),
     onLine: async (line) => {
       await refresh();
@@ -60,13 +68,14 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   const push = () =>
     void refresh()
-      .then((l) => client.send({ kind: "ext-terminals", terminals: publicList(l) }))
+      .then((l) => client.send({ kind: "ext-terminals", terminals: publicList(l), workspaceFolders: workspaceFolders() }))
       .catch((e) => log(`push failed: ${String(e)}`));
   ctx.subscriptions.push(
     out,
     bar,
     vscode.window.onDidOpenTerminal(push),
     vscode.window.onDidCloseTerminal(push),
+    vscode.workspace.onDidChangeWorkspaceFolders(push),
     vscode.commands.registerCommand("buddy.showLog", () => out.show(true)),
     { dispose: () => client.stop() },
   );

@@ -68,20 +68,23 @@ If `wantsReply` is `true`, the app answers on the same connection with exactly o
 The extension keeps one long-lived connection. The first line must be `ext-hello`; it makes the connection an **extension** connection. An extension connection can send only `ext-terminals` and `ack` after that. A `hook` message on it closes the connection. The first line:
 
 ```json
-{"kind":"ext-hello","editor":"vscode","appPid":4567,"version":"0.1.0","terminals":[{"shellPid":122,"name":"zsh"}]}
+{"kind":"ext-hello","editor":"vscode","appPid":4567,"version":"0.1.2","terminals":[{"shellPid":122,"name":"zsh"}],"workspaceFolders":["/Users/me/proj"]}
 ```
 
 - `editor`: `"vscode"` or `"cursor"`.
 - `appPid`: the editor main pid or the extension host pid.
 - `terminals[].shellPid`: `Terminal.processId` (the shell pid). The app matches it against `env.shellPid` from hook events.
+- `workspaceFolders` (optional, since 0.1.2): absolute fsPaths of `vscode.workspace.workspaceFolders`. Max 20 entries, each at most 1024 chars. The app drops non-absolute or oversize entries. Older extensions omit it; the app then has no folder for that window. Jump uses the folders to raise the right editor window.
 - The app keeps only terminals whose shell runs under the same editor app process as the extension (process ancestry). Other entries are ignored.
 - Pending `send` acks fail with `error: "disconnected"` when the extension connection closes.
 
 When terminals open or close, send the full current list:
 
 ```json
-{"kind":"ext-terminals","terminals":[{"shellPid":122,"name":"zsh"},{"shellPid":130,"name":"bash"}]}
+{"kind":"ext-terminals","terminals":[{"shellPid":122,"name":"zsh"},{"shellPid":130,"name":"bash"}],"workspaceFolders":["/Users/me/proj"]}
 ```
+
+Send it also when the workspace folders change (`onDidChangeWorkspaceFolders`). If `workspaceFolders` is missing, the app keeps the last list.
 
 ## app → extension
 
@@ -93,7 +96,7 @@ When terminals open or close, send the full current list:
 - `send`: type `text` into the terminal whose shell pid is `shellPid` (`terminal.sendText(text, submit)`). `submit: true` means press Enter after the text.
   - Before it sends, the app checks: the session is `done`, `idle`, or `starting`; claude is alive; claude is the foreground process group of its tty; claude is not stopped. If a check fails, the app sends nothing.
   - `text` never contains C0 control characters (tab is allowed) or newlines (they become spaces). It is at most 32 KB of UTF-8.
-- `focus`: reveal and focus that terminal (`terminal.show(false)`), and bring the editor window forward.
+- `focus`: reveal and focus that terminal (`terminal.show(false)`), The VS Code API cannot raise the OS window. The app raises the window first (Accessibility, or the editor CLI with the folder path), then sends `focus`.
 
 ## extension → app
 

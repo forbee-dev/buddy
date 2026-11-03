@@ -7,7 +7,7 @@ if [ -n "${BUDDY_SIGN_ID:-}" ]; then
   case "$SIGN_ID" in "Developer ID Application"*) SIGN_KIND="developer-id" ;; esac
 elif dev_id="$(printf '%s\n' "$identities" | sed -n 's/.*"\(Developer ID Application[^"]*\)".*/\1/p' | head -1)" && [ -n "$dev_id" ]; then
   SIGN_ID="$dev_id"; SIGN_KIND="developer-id"
-elif printf '%s\n' "$identities" | grep -q '"Buddy Dev"'; then
+elif security find-identity -p codesigning 2>/dev/null | grep -q '"Buddy Dev"'; then  # no -v: a self-signed cert is "not trusted" but signs fine
   SIGN_ID="Buddy Dev"; SIGN_KIND="buddy-dev"
 else
   SIGN_ID="-"; SIGN_KIND="adhoc"

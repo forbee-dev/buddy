@@ -34,6 +34,9 @@ public enum BuddySize: String, CaseIterable, Sendable, Identifiable {
     /// Name tag font: grows a little with the mascot, never below 9 pt.
     public var tagFontSize: Double { min(13, max(9, 9 + factor)) }
 
+    /// Gap between grouped mascots: 8 pt at the default 2×.
+    public var groupSpacing: Double { 4 * factor }
+
     /// Old 2–5 integer scale setting → nearest size.
     public static func migrate(scale: Int) -> BuddySize {
         switch scale {

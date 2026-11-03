@@ -34,6 +34,14 @@ open build/Buddy.app
 - `Contents/Resources`: `sprites.json` (from `design/`), `AppIcon.icns`, and the newest `vscode-ext/buddy-companion-*.vsix` if there is one.
 - `scripts/make-icon.swift` makes `Resources/AppIcon.icns` from the sprites when `design/sprites.json` changes.
 
+### Local dev install
+
+```sh
+./scripts/install-local.sh
+```
+
+The script builds with `build-app.sh` and quits a running Buddy. It moves an old `/Applications/Buddy.app` to `~/.Trash` with a timestamp. Then it copies the new app with `ditto` and checks it with `codesign --verify --deep`. It unregisters `build/Buddy.app` from LaunchServices, registers `/Applications/Buddy.app`, and opens it. Use this instead of opening `build/Buddy.app`, so macOS does not keep two copies registered.
+
 ### Local signing certificate (once)
 
 An ad-hoc signature makes macOS reset the Accessibility permission on every rebuild. To keep it:
@@ -58,10 +66,18 @@ The welcome window opens on the first launch. You can open it again from the men
 | Permission | Why |
 |---|---|
 | Notifications | Alerts when a session needs you or finishes. |
-| Accessibility | Jump raises the editor window that has the project open. |
+| Accessibility | Jump raises the editor window that has the project open. Without it, Jump needs the companion extension 0.1.2 for exact window focus. |
 | Automation | Jump selects the iTerm2 or Terminal tab of the session. macOS asks once per app. |
 
 You can see and request them later in Settings → Permissions.
+
+### Notifications don't work
+
+Notifications are optional. If **Request** shows "macOS refused":
+
+1. Sign the app with a local certificate (see Local signing certificate above). Then run `./scripts/build-app.sh` again.
+2. Or open System Settings → Notifications and turn Buddy on. Settings has an **Open Notification Settings** button.
+3. After a denial, macOS does not ask again. **Request** then opens Notification Settings.
 
 If Buddy runs from outside an Applications folder, the window first offers **Move to Applications**. The hooks point at the app's path, so move the app before you install them.
 
@@ -86,6 +102,7 @@ If Buddy is not running, the hook exits at once with no output. Claude then work
 ## VS Code / Cursor extension
 
 The companion extension lets Buddy type your next prompt into the right editor terminal, and focus that terminal on Jump.
+- Jump needs the companion extension 0.1.2 or Accessibility for exact window focus. With two editor windows open, the extension tells Buddy which folder each window has.
 - Settings → Hooks & Extension shows **Install in VS Code** and **Install in Cursor** for each editor command it finds (`code`, `cursor` in `/usr/local/bin`, `/opt/homebrew/bin`, or inside the app bundles).
 - Buddy runs `<cli> --install-extension <bundled .vsix> --force` only when you click. It shows the result.
 - Without the extension, Buddy sends the next prompt through the session's inbox socket, as a peer message.

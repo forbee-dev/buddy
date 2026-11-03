@@ -76,11 +76,14 @@ public struct ExtHelloMessage: Codable, Sendable, Equatable {
     public var appPid: Int32
     public var version: String
     public var terminals: [ExtTerminal]
+    /// Absent from extensions older than 0.1.2.
+    public var workspaceFolders: [String]?
 }
 
 public struct ExtTerminalsMessage: Codable, Sendable, Equatable {
     public var kind = "ext-terminals"
     public var terminals: [ExtTerminal]
+    public var workspaceFolders: [String]?
 }
 
 public struct SendMessage: Codable, Sendable, Equatable {

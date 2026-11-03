@@ -23,6 +23,14 @@ final class MascotDirector {
     private var last = CACurrentMediaTime()
     private var observers: [NSObjectProtocol] = []
     let images = SpriteImages()
+    private var seen: [String: Int] = [:]
+    private var seenCount = 0
+    private var slots: [String: NSPoint] = [:]
+    private var anchor: CGPoint?
+    private var anchorFor: Arrangement?
+    private var wasGrouped = false
+    private var dragStart: CGPoint?
+    var isGroupDragging: Bool { dragStart != nil }
 
     init(model: AppModel) {
         self.model = model
@@ -77,14 +85,22 @@ final class MascotDirector {
     func sync() {
         let specs = specs()
         let keys = Set(specs.map(\.key))
+        for spec in specs where seen[spec.key] == nil { seen[spec.key] = seenCount; seenCount += 1 }
+        seen = seen.filter { keys.contains($0.key) || controllers[$0.key] != nil }
         for (key, c) in controllers where !keys.contains(key) { c.leave() }
+        var fresh: [MascotController] = []
         for spec in specs {
             if let c = controllers[spec.key], !c.isLeaving { c.update(spec) }
             else {
                 controllers[spec.key]?.close()
-                controllers[spec.key] = MascotController(spec: spec, director: self, startX: freeX(width: 32 * model.pointScale))
+                let width = 32 * model.pointScale
+                let c = MascotController(spec: spec, director: self, startX: grouped ? groupBounds().maxX + 10 : freeX(width: width))
+                controllers[spec.key] = c
+                fresh.append(c)
             }
         }
+        relayoutGroup()
+        for c in fresh { if let slot = slot(for: c) { c.setY(slot.y) } }
         images.prune(keeping: Set(controllers.values.map(\.spec.look)))
         wake()
     }
@@ -113,6 +129,95 @@ final class MascotDirector {
     func removed(_ c: MascotController) {
         if controllers[c.key] === c { controllers[c.key] = nil }
         wake()
+    }
+
+    // MARK: Grouped arrangement
+
+    var grouped: Bool { model.arrangement != .free && model.mode != .single }
+
+    func slot(for c: MascotController) -> NSPoint? { grouped ? slots[c.key] : nil }
+
+    func arrangementChanged() {
+        relayoutGroup()
+        wake()
+    }
+
+    private func currentAnchor() -> CGPoint {
+        if anchorFor != model.arrangement || anchor == nil {
+            anchorFor = model.arrangement
+            anchor = model.defaults.groupAnchor(model.arrangement) ?? GroupLayout.defaultAnchor(bounds: floor)
+        }
+        return anchor ?? GroupLayout.defaultAnchor(bounds: floor)
+    }
+
+    /// Visible frame of the screen holding `p`; the probe sits just inside the group's bottom-right corner.
+    private func bounds(holding p: CGPoint) -> NSRect {
+        let probe = CGPoint(x: p.x - 1, y: p.y + 1)
+        return (NSScreen.screens.first { $0.frame.contains(probe) } ?? NSScreen.main)?.visibleFrame ?? floor
+    }
+
+    private func groupBounds() -> NSRect { bounds(holding: currentAnchor()) }
+
+    private func currentLayout(_ members: [MascotController]) -> GroupLayout? {
+        guard let first = members.first else { return nil }
+        let a = currentAnchor()
+        return GroupLayout.layout(count: members.count, item: first.panelSize, spacing: CGFloat(model.size.groupSpacing),
+                                  vertical: model.arrangement == .groupedVertical, anchor: a, bounds: bounds(holding: a))
+    }
+
+    private func members() -> [MascotController] {
+        controllers.values.filter(\.holdsSlot).sorted { (seen[$0.key] ?? .max, $0.key) < (seen[$1.key] ?? .max, $1.key) }
+    }
+
+    /// Recomputes slots; cheap, so it runs on every sync and tick.
+    func relayoutGroup() {
+        guard grouped else {
+            if wasGrouped { for c in controllers.values { c.leaveGroup() } }
+            wasGrouped = false
+            slots = [:]
+            dragStart = nil
+            return
+        }
+        wasGrouped = true
+        let list = members()
+        for c in controllers.values where !list.contains(where: { $0 === c }) { c.setPosition(nil, of: 0) }
+        guard let layout = currentLayout(list) else { slots = [:]; return }
+        anchor = layout.anchor
+        slots = Dictionary(uniqueKeysWithValues: zip(list.map(\.key), layout.origins.map { NSPoint(x: $0.x, y: $0.y) }))
+        for (i, c) in list.enumerated() { c.setPosition(i + 1, of: list.count) }
+    }
+
+    func beginGroupDrag() { dragStart = currentAnchor() }
+
+    func dragGroup(by d: NSPoint) {
+        guard let start = dragStart else { return }
+        anchor = CGPoint(x: start.x + d.x, y: start.y + d.y)
+        relayoutGroup()
+    }
+
+    func endGroupDrag() {
+        dragStart = nil
+        relayoutGroup()
+        saveAnchor()
+        wake()
+    }
+
+    func moveGroupToEdge(left: Bool) {
+        let b = groupBounds()
+        let width = currentLayout(members())?.size.width ?? 0
+        anchor = CGPoint(x: left ? b.minX + width : b.maxX, y: currentAnchor().y)
+        relayoutGroup()
+        saveAnchor()
+        wake()
+    }
+
+    private func saveAnchor() {
+        if let anchor { model.defaults.setGroupAnchor(anchor, for: model.arrangement) }
+    }
+
+    func bubblePlacement(for sprite: NSRect) -> BubblePlacement? {
+        guard grouped else { return nil }
+        return BubblePlacement.choose(sprite: sprite, screen: bounds(holding: currentAnchor()), vertical: model.arrangement == .groupedVertical)
     }
 
     var floor: NSRect { NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900) }
@@ -155,6 +260,7 @@ final class MascotDirector {
         last = now
         let all = Array(controllers.values)
         let active = all.filter { !$0.isLeaving }
+        if !isGroupDragging { relayoutGroup() }
         let mouse = NSEvent.mouseLocation
         for c in all {
             c.step(dt: dt, others: active)

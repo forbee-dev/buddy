@@ -5,24 +5,80 @@ import BuddyCore
 /// Brings the terminal of a session to the front.
 @MainActor
 enum Jumper {
-    static func jump(to s: Session, ext: ExtensionHub) {
+    static let windowNote = "Jump could not find the window. Grant Accessibility for exact window focus."
+
+    /// Returns a note for the bubble when the right window could not be raised.
+    @discardableResult
+    static func jump(to s: Session, ext: ExtensionHub) -> String? {
         let app = s.terminal == .claudeDesktop
             ? NSRunningApplication.runningApplications(withBundleIdentifier: TerminalApp.desktopBundleId).first
             : s.env.claudePid.flatMap(terminalApp(above:))
-        if let app {
-            NSApp.yieldActivation(to: app)
-            app.activate()
-        } else {
-            log.info("Jump: no GUI app found above the claude process")
-        }
+        if app == nil { log.info("Jump: no GUI app found above the claude process") }
         switch s.terminal {
         case .vscode, .cursor:
-            if let shell = s.env.shellPid, ext.hasTerminal(shellPid: shell) { ext.focus(shellPid: shell) }
-            else if let app { raiseWindow(pid: app.processIdentifier, titleContains: s.projectName) }
-        case .iterm: if let tty = s.env.tty { runScript(itermScript(tty: tty)) }
-        case .terminal: if let tty = s.env.tty { runScript(terminalScript(tty: tty)) }
-        case .other: if let app { raiseWindow(pid: app.processIdentifier, titleContains: s.projectName) }
-        case .claudeDesktop: break  // no per-session link: Desktop comes forward, the user picks the session
+            let pick = ext.jumpTarget(shellPid: s.env.shellPid, cwd: s.cwd)
+            let raised = raiseEditorWindow(app: app, terminal: s.terminal, pick: pick, projectName: s.projectName)
+            if let shell = s.env.shellPid, ext.hasTerminal(shellPid: shell) {
+                log.info("Jump: route=extension-focus")
+                ext.focus(shellPid: shell)
+            }
+            return raised ? nil : windowNote
+        case .iterm:
+            activate(app)
+            if let tty = s.env.tty { runScript(itermScript(tty: tty)) }
+        case .terminal:
+            activate(app)
+            if let tty = s.env.tty { runScript(terminalScript(tty: tty)) }
+        case .other:
+            activate(app)
+            if let app { raiseWindow(pid: app.processIdentifier, titleContains: s.projectName) }
+        case .claudeDesktop: activate(app)  // no per-session link: Desktop comes forward, the user picks the session
+        }
+        return nil
+    }
+
+    private static func activate(_ app: NSRunningApplication?) {
+        guard let app else { return }
+        NSApp.yieldActivation(to: app)
+        app.activate()
+    }
+
+    /// Raises the window of `pick.folder` without activating the app first: activation shows the wrong window.
+    private static func raiseEditorWindow(app: NSRunningApplication?, terminal: TerminalApp, pick: JumpTarget.Pick, projectName: String) -> Bool {
+        let trusted = AXIsProcessTrusted()
+        log.info("Jump: route=editor-window ax-trusted=\(trusted ? "yes" : "no", privacy: .public) folder-known=\(pick.isOpen ? "yes" : "no", privacy: .public)")
+        if trusted, let app {
+            let folderName = (pick.folder as NSString).lastPathComponent
+            let matched = [folderName, projectName].filter { !$0.isEmpty }.contains {
+                raiseWindow(pid: app.processIdentifier, titleContains: $0)
+            }
+            log.info("Jump: title-matched=\(matched ? "yes" : "no", privacy: .public)")
+            if matched { activate(app); return true }
+        }
+        if pick.isOpen {
+            let used = runEditorCLI(terminal: terminal, folder: pick.folder)
+            log.info("Jump: cli-used=\(used ? "yes" : "no", privacy: .public)")
+            if used { return true }
+        } else {
+            log.info("Jump: folder not open in any window; cli skipped")
+        }
+        activate(app)
+        return false
+    }
+
+    /// Plain folder argument focuses the window that already has it open. `-r` would load it into the last active window.
+    private static func runEditorCLI(terminal: TerminalApp, folder: String) -> Bool {
+        guard let args = JumpTarget.cliArgs(folder: folder),
+              let bin = JumpTarget.cliCandidates(for: terminal).first(where: FileManager.default.isExecutableFile(atPath:)) else { return false }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: bin)
+        p.arguments = args
+        p.standardInput = FileHandle.nullDevice
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        do { try p.run(); return true } catch {
+            log.error("Jump: editor CLI failed to start")
+            return false
         }
     }
 
@@ -80,19 +136,21 @@ enum Jumper {
         if let error { log.error("Jump AppleScript failed: \(error[NSAppleScript.errorNumber] as? Int ?? 0)") }
     }
 
-    static func raiseWindow(pid: Int32, titleContains name: String) {
-        guard AXIsProcessTrusted() else { log.info("Jump: Accessibility not granted"); return }
+    @discardableResult
+    static func raiseWindow(pid: Int32, titleContains name: String) -> Bool {
+        guard AXIsProcessTrusted() else { log.info("Jump: Accessibility not granted"); return false }
         let app = AXUIElementCreateApplication(pid)
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
-              let windows = value as? [AXUIElement] else { return }
+              let windows = value as? [AXUIElement] else { return false }
         for w in windows {
             var title: CFTypeRef?
             AXUIElementCopyAttributeValue(w, kAXTitleAttribute as CFString, &title)
             guard let t = title as? String, t.localizedCaseInsensitiveContains(name) else { continue }
             AXUIElementPerformAction(w, kAXRaiseAction as CFString)
             AXUIElementSetAttributeValue(w, kAXMainAttribute as CFString, kCFBooleanTrue)
-            return
+            return true
         }
+        return false
     }
 }

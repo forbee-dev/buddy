@@ -25,6 +25,7 @@ final class AppModel {
     var reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
 
     var mode: MascotMode { didSet { defaults.set(mode.rawValue, forKey: PrefKey.mode); changed() } }
+    var arrangement: Arrangement { didSet { defaults.set(arrangement.rawValue, forKey: PrefKey.arrangement); director?.arrangementChanged() } }
     var walking: Bool { didSet { defaults.set(walking, forKey: PrefKey.walking) } }
     var size: BuddySize { didSet { defaults.set(size.rawValue, forKey: PrefKey.size); director?.rebuild() } }
     /// All mascot and bubble panels ordered out; menu and notifications keep working.
@@ -35,7 +36,7 @@ final class AppModel {
     var notifyDone: Bool { didSet { defaults.set(notifyDone, forKey: PrefKey.notifyDone) } }
     var hotkey: HotkeyChoice { didSet { defaults.set(hotkey.rawValue, forKey: PrefKey.hotkey); Hotkey.shared.apply(hotkey) } }
 
-    @ObservationIgnored private let defaults = UserDefaults.standard
+    @ObservationIgnored let defaults = UserDefaults.standard
     @ObservationIgnored private var server: SocketServer?
     @ObservationIgnored private var lockFD: Int32 = -1
     @ObservationIgnored private var hookConnections: [String: Connection] = [:]
@@ -51,6 +52,7 @@ final class AppModel {
     private init() {
         let d = UserDefaults.standard
         mode = MascotMode(rawValue: d.string(forKey: PrefKey.mode) ?? "") ?? .perSession
+        arrangement = Arrangement(rawValue: d.string(forKey: PrefKey.arrangement) ?? "") ?? .free
         walking = d.bool(PrefKey.walking, default: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
         size = BuddySize(rawValue: d.string(forKey: PrefKey.size) ?? "")
             ?? (d.object(forKey: PrefKey.scale) != nil ? .migrate(scale: d.integer(forKey: PrefKey.scale)) : .medium)
@@ -281,6 +283,7 @@ final class AppModel {
     }
 
     func dismissNote(_ sid: String) { store.setNote(sid, nil) }
+    func showNote(_ sid: String, _ note: String) { store.setNote(sid, note); changed() }
     func setHidden(_ sid: String, _ hidden: Bool) { store.setHidden(sid, hidden); changed() }
 
     // MARK: Looks (cached per cwd)

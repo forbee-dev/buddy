@@ -118,6 +118,7 @@ Full steps and troubleshooting: [docs/INSTALL.md](docs/INSTALL.md).
 ## Using it
 
 - **Menu bar.** The icon is an outline. It fills with a count dot when a session needs you, even while the buddies are hidden. The dropdown has Hide/Show buddies, a list of buddies (the ones that need you come first, each with thumbnail, project, state dot and app name), Settings, Welcome and Quit.
+- **Arrangement.** Settings → General: Free (default), Stacked or Row. In Stacked and Row the buddies keep a fixed order with a gap, and dragging one moves the whole group. Not used in single-buddy mode.
 - **Pinning.** Drag a mascot to pin it. Double-click to unpin.
 - **Right-click menu.** Re-roll look, palette, outfit, Move to left/right edge, Jump and Hide.
 - **Modes.** One mascot per session (the default), or a single buddy with a badge and a session picker.

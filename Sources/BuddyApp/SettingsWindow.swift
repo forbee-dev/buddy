@@ -37,6 +37,13 @@ private struct GeneralTab: View {
             Picker("Mascots", selection: $model.mode) {
                 ForEach(MascotMode.allCases) { Text($0.label).tag($0) }
             }
+            Picker("Arrangement", selection: $model.arrangement) {
+                ForEach(Arrangement.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .disabled(model.mode == .single)
+            Text(model.mode == .single ? "Single buddy mode has one buddy, so there is nothing to arrange." : model.arrangement.hint)
+                .font(.caption).foregroundStyle(.secondary)
             Toggle("Walk around when idle", isOn: $model.walking)
             if model.reduceMotion { Text("Reduce Motion is on: buddies stand still.").font(.caption).foregroundStyle(.secondary) }
             Toggle("Sleeping buddy when no sessions", isOn: $model.sleepMascot)

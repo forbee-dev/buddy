@@ -114,8 +114,14 @@ struct PermissionRows: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            row("Notifications", "Alerts when a session needs you.", permissions.notifications) {
+            row("Notifications (optional)", "Alerts when a session needs you. If no prompt appears, open System Settings → Notifications → Buddy and turn on Allow notifications. If Buddy is not in that list, sign the app first (docs/INSTALL.md → Local signing certificate).", permissions.notifications) {
                 Task { await permissions.requestNotifications() }
+            } extra: {
+                if let err = permissions.notificationError {
+                    Text(err).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Button("Open Notification Settings") { permissions.openNotificationSettings() }
+                    .accessibilityLabel("Open Notification Settings")
             }
             row("Accessibility", "Jump raises the editor window that has the project open.", permissions.accessibility) {
                 permissions.requestAccessibility()
@@ -125,13 +131,18 @@ struct PermissionRows: View {
             }
         }
         .task { await permissions.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await permissions.refresh() }
+        }
     }
 
-    private func row(_ name: String, _ why: String, _ state: PermissionState, request: @escaping () -> Void) -> some View {
+    private func row<Extra: View>(_ name: String, _ why: String, _ state: PermissionState, request: @escaping () -> Void,
+                                  @ViewBuilder extra: () -> Extra = { EmptyView() }) -> some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(name).font(.headline)
                 Text(why).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if state != .granted { extra() }
             }
             Spacer()
             if state == .granted {

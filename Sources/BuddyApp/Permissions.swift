@@ -12,13 +12,14 @@ final class Permissions {
     var notifications: PermissionState = .unknown
     var accessibility: PermissionState = .unknown
     var automation: PermissionState = .unknown
+    var notificationError: String?
 
     func refresh() async {
         accessibility = AXIsProcessTrusted() ? .granted : .unknown
         if Notifier.available {
             let s = await UNUserNotificationCenter.current().notificationSettings()
             switch s.authorizationStatus {
-            case .authorized, .provisional: notifications = .granted
+            case .authorized, .provisional: notifications = .granted; notificationError = nil
             case .denied: notifications = .denied
             default: notifications = .unknown
             }
@@ -28,10 +29,24 @@ final class Permissions {
 
     func requestNotifications() async {
         guard Notifier.available else { return }
-        do { _ = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) } catch {
+        if notifications == .denied { openNotificationSettings(); return }
+        do {
+            _ = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+            notificationError = nil
+        } catch {
             log.error("Notification request failed: \(error.localizedDescription, privacy: .public)")
+            let ns = error as NSError
+            notificationError = ns.domain == UNErrorDomain && ns.code == UNError.Code.notificationsNotAllowed.rawValue
+                ? "macOS refused. This usually happens with an unsigned build. Sign it with a local certificate (see docs/INSTALL.md → Local signing certificate), or turn Buddy on in Notification Settings."
+                : error.localizedDescription
         }
         await refresh()
+    }
+
+    func openNotificationSettings() {
+        let urls = ["x-apple.systempreferences:com.apple.Notifications-Settings.extension",
+                    "x-apple.systempreferences:com.apple.preference.notifications"]
+        for u in urls { if let url = URL(string: u), NSWorkspace.shared.open(url) { return } }
     }
 
     func requestAccessibility() {

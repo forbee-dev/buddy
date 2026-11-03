@@ -4,7 +4,7 @@ import BuddyCore
 /// Connected VS Code / Cursor extensions and their terminals.
 @MainActor
 final class ExtensionHub {
-    private struct Client { let conn: Connection; var editor: String; var terminals: [ExtTerminal] }
+    private struct Client { let conn: Connection; var editor: String; var terminals: [ExtTerminal]; var folders: [String] }
     private var clients: [ObjectIdentifier: Client] = [:]
     private var acks: [String: (conn: ObjectIdentifier, cont: CheckedContinuation<AckMessage, Never>)] = [:]
     /// The editor app process above the extension peer; claimed terminals must descend from it.
@@ -14,7 +14,8 @@ final class ExtensionHub {
     func hello(_ m: ExtHelloMessage, from conn: Connection) {
         let root = conn.peerPid.flatMap(Jumper.terminalApp(above:))?.processIdentifier
         roots[ObjectIdentifier(conn)] = root
-        clients[ObjectIdentifier(conn)] = Client(conn: conn, editor: m.editor, terminals: owned(m.terminals, root: root))
+        clients[ObjectIdentifier(conn)] = Client(conn: conn, editor: m.editor, terminals: owned(m.terminals, root: root),
+                                                   folders: JumpTarget.validFolders(m.workspaceFolders))
         log.info("Extension connected: \(m.editor, privacy: .public) \(m.version, privacy: .public)")
         onChange?()
     }
@@ -22,6 +23,7 @@ final class ExtensionHub {
     func terminals(_ m: ExtTerminalsMessage, from conn: Connection) {
         let id = ObjectIdentifier(conn)
         clients[id]?.terminals = owned(m.terminals, root: roots[id])
+        if let f = m.workspaceFolders { clients[id]?.folders = JumpTarget.validFolders(f) }
         onChange?()
     }
 
@@ -46,6 +48,12 @@ final class ExtensionHub {
 
     private func client(forShell pid: Int32) -> Client? {
         clients.values.first { $0.terminals.contains { $0.shellPid == pid } }
+    }
+
+    /// Window folder to raise: see `JumpTarget.pick`.
+    func jumpTarget(shellPid: Int32?, cwd: String) -> JumpTarget.Pick {
+        let owner = shellPid.flatMap(client(forShell:))?.folders
+        return JumpTarget.pick(ownerFolders: owner, allFolders: clients.values.flatMap(\.folders), cwd: cwd)
     }
 
     func hasTerminal(shellPid: Int32) -> Bool { client(forShell: shellPid) != nil }

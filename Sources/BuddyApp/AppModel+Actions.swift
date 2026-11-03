@@ -62,7 +62,7 @@ extension AppModel {
 
     func jump(_ sid: String) {
         guard let s = session(sid) else { return }
-        Jumper.jump(to: s, ext: ext)
+        if let note = Jumper.jump(to: s, ext: ext) { showNote(sid, note) }
     }
 
     // MARK: Looks
