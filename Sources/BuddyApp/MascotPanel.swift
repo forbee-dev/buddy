@@ -16,6 +16,10 @@ final class MascotPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         // Keeps commands and answers out of screen sharing and screenshots (review L6).
         sharingType = .none
+        #if DEBUG
+        // `--demo-cards` only: fake data, and the card screenshots need the windows to be capturable.
+        if Demo.on { sharingType = .readOnly }
+        #endif
     }
 
     private let canKey: Bool

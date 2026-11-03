@@ -6,6 +6,9 @@ extension AppModel {
 
     /// Claude Desktop sessions use the inbox only: never the editor route, never keystrokes.
     func route(for s: Session) -> PromptRoute {
+        #if DEBUG
+        if Demo.on { return s.terminal == .claudeDesktop ? .inbox : .editor(s.terminal.displayName) }
+        #endif
         if s.terminal == .claudeDesktop { return s.env.messagingSocket != nil ? .inbox : .none }
         if let shell = s.env.shellPid, ext.hasTerminal(shellPid: shell) { return .editor(s.terminal.displayName) }
         if s.env.messagingSocket != nil { return .inbox }
@@ -58,19 +61,23 @@ extension AppModel {
         }
     }
 
+    // MARK: Context line
+
+    /// What Claude said before `requestId`, read off the main thread from the validated transcript. nil on any failure.
+    func context(for s: Session, requestId: String) async -> String? {
+        if let hit = contextCache[requestId] { return hit.isEmpty ? nil : hit }
+        guard let path = s.transcriptPath else { return nil }
+        let text = await Task.detached(priority: .utility) { TranscriptTail.lastAssistantText(path: path) }.value
+        if contextCache.count >= 32 { contextCache.removeAll() }
+        contextCache[requestId] = text ?? ""
+        return text
+    }
+
     // MARK: Jump
 
     func jump(_ sid: String) {
         guard let s = session(sid) else { return }
         if let note = Jumper.jump(to: s, ext: ext) { showNote(sid, note) }
-    }
-
-    // MARK: Looks
-
-    func rerollLook(cwd: String) {
-        guard let sheet else { return }
-        let outfits = sheet.outfits(fitting: LookPicker.pick(cwd: cwd, sheet: sheet).base)
-        setLook(cwd: cwd, palette: sheet.paletteNames.randomElement(), outfit: .some(outfits.randomElement()))
     }
 
     // MARK: Hooks
@@ -80,7 +87,9 @@ extension AppModel {
     var canInstallHooks: Bool { FileManager.default.isExecutableFile(atPath: hookPath) }
 
     func refreshHookStatus() {
-        hooksInstalled = canInstallHooks && HookInstaller.isInstalled(settingsURL: settingsURL, hookPath: hookPath)
+        let status = canInstallHooks ? HookInstaller.status(settingsURL: settingsURL, hookPath: hookPath) : .missing
+        hooksInstalled = status == .current
+        hooksOutdated = status == .outdated
     }
 
     func installHooks(_ install: Bool) {

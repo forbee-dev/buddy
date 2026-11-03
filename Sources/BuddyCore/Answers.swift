@@ -4,6 +4,8 @@ public struct AskQuestion: Sendable, Equatable {
     public struct Option: Sendable, Equatable {
         public var label: String
         public var description: String?
+        /// Markdown-ish text (often code or an ASCII mockup) shown beside the options.
+        public var preview: String?
     }
     public var question: String
     public var header: String?
@@ -15,12 +17,15 @@ public struct AskQuestion: Sendable, Equatable {
             guard let text = q["question"]?.string else { return nil }
             let opts = (q["options"]?.array ?? []).compactMap { o -> Option? in
                 guard let label = o["label"]?.string else { return nil }
-                return Option(label: label, description: o["description"]?.string)
+                let preview = o["preview"]?.string.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+                return Option(label: label, description: o["description"]?.string, preview: preview)
             }
             return AskQuestion(question: text, header: q["header"]?.string, options: opts,
                                multiSelect: q["multiSelect"]?.bool ?? false)
         }
     }
+
+    public var hasPreview: Bool { options.contains { $0.preview != nil } }
 }
 
 /// Builds PermissionRequest hook outputs. Shapes: docs/hooks-facts.md sections 2 and "W2 hand tests".

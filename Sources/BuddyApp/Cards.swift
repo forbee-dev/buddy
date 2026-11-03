@@ -1,19 +1,96 @@
+import AppKit
 import SwiftUI
 import BuddyCore
 
-/// Monospaced, selectable, scrollable. Never truncated.
+/// Monospaced, selectable, scrollable code block with a line count and a copy button. Never truncated.
 struct CodeBox: View {
     let text: String
+    let lines: Int
+    var accent: Color = .secondary
+
     var body: some View {
-        ScrollView([.vertical, .horizontal]) {
-            Text(text).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(lines == 1 ? "1 line" : "\(lines) lines").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                    Announcer.say("Copied")
+                } label: { Label("Copy", systemImage: "doc.on.doc").font(.caption) }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Copy tool input")
+                    .help("Copy")
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            Divider()
+            // Wraps instead of scrolling sideways, so the end of a long command is never out of view.
+            ScrollView {
+                Text(text).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+            }
+            .frame(minHeight: 36, maxHeight: 220)
+            .accessibilityLabel("Tool input")
+            .accessibilityValue(text)
         }
-        .frame(minHeight: 44, maxHeight: 220)
-        .background(RoundedRectangle(cornerRadius: 8).fill(.background.opacity(0.6)))
-        .accessibilityLabel("Tool input")
-        .accessibilityValue(text)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(accent.opacity(0.5)))
     }
+}
+
+/// "Claude: …" — what Claude said before this request. Two lines; click to expand.
+struct ContextLine: View {
+    let requestId: String
+    @Bindable var draft: BubbleSelection
+
+    var body: some View {
+        if let c = draft.context, c.id == requestId {
+            Button { draft.contextExpanded.toggle() } label: {
+                Text("Claude: \(c.text)")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .lineLimit(draft.contextExpanded ? nil : 2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Claude said: \(c.text)")
+            .accessibilityHint(draft.contextExpanded ? "Shows less" : "Shows all of it")
+            .help(draft.contextExpanded ? "Show less" : "Show all")
+        }
+    }
+}
+
+extension View {
+    /// Loads the context line for `requestId`. Sits on the card, not on the (often empty) line itself.
+    func loadsContext(_ model: AppModel, _ session: Session, _ requestId: String, _ draft: BubbleSelection) -> some View {
+        task(id: requestId) {
+            let text = await model.context(for: session, requestId: requestId)
+            if let text, draft.requestId == requestId { draft.context = (requestId, text) }
+        }
+    }
+}
+
+/// Grows with its content up to `maxHeight`, then scrolls.
+struct FitScroll<Content: View>: View {
+    let key: String
+    let maxHeight: CGFloat
+    let draft: BubbleSelection
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        ScrollView {
+            content.onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { h in
+                if draft.heights[key] != h { draft.heights[key] = h }
+            }
+        }
+        .frame(height: draft.heights[key].map { min($0, maxHeight) })
+    }
+
+    /// About 70% of the screen, minus the header and the footer.
+    static var screenCap: CGFloat { max(200, (NSScreen.main?.visibleFrame.height ?? 800) * 0.7 - 160) }
 }
 
 private let armHint = "Available a moment after the card appears or stops moving."
@@ -24,46 +101,99 @@ struct PermissionCard: View {
     let pending: PendingRequest
     @Bindable var draft: BubbleSelection
     @FocusState private var focus: Bool
+    @FocusState private var reasonFocused: Bool
 
     var body: some View {
         let detail = draft.detail(for: pending)
-        VStack(alignment: .leading, spacing: 8) {
-            Text("\(DisplayText.reveal(pending.toolName)) wants permission").font(.subheadline.bold()).accessibilityAddTraits(.isHeader)
-            if PermissionDisplay.sandboxDisabled(pending.toolInput) {
+        let risk = PermissionDisplay.risk(tool: pending.toolName, input: pending.toolInput)
+        VStack(alignment: .leading, spacing: 10) {
+            if risk == .sandboxOff {
                 Label("Runs OUTSIDE the sandbox (dangerouslyDisableSandbox)", systemImage: "exclamationmark.octagon.fill")
                     .font(.callout.bold()).foregroundStyle(.white).padding(6)
                     .background(RoundedRectangle(cornerRadius: 6).fill(Color(red: 0.70, green: 0, blue: 0)))
             }
+            ContextLine(requestId: pending.id, draft: draft)
             if let d = pending.toolInput["description"]?.string {
-                Text("Claude says: \(DisplayText.reveal(d))").font(.callout).foregroundStyle(.secondary)
+                Text(DisplayText.reveal(d)).font(.callout.weight(.medium)).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Claude says: \(DisplayText.reveal(d))")
             }
-            CodeBox(text: detail.text)
+            CodeBox(text: detail.text, lines: detail.lines, accent: risk.color)
             if detail.lines > 10 || detail.chars > 500 {
-                WarningText(text: "\(detail.lines) lines, \(detail.chars) chars. Scroll to read all of it.")
+                WarningText(text: "\(detail.chars) characters. Scroll to read all of it.")
             }
-            ForEach(Array(pending.suggestions.enumerated()), id: \.offset) { _, sug in
-                Button(DisplayText.reveal(HookOutput.suggestionLabel(sug))) { send(HookOutput.allowAlways(sug)) }
-                    .disabled(!draft.armed).accessibilityHint(draft.armed ? "Saves a rule and allows" : armHint)
-            }
-            TextField("Reason for deny (optional)", text: $draft.reason).textFieldStyle(.roundedBorder)
-            HStack {
-                Button("Allow") { send(HookOutput.allow()) }
+            HStack(spacing: 8) {
+                Button { send(HookOutput.allow()) } label: { Text("Allow").frame(minWidth: 56) }
+                    .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.return, modifiers: .command).help("Allow (⌘↩)")
                     .disabled(!draft.armed).accessibilityHint(draft.armed ? "" : armHint)
-                Button("Deny", role: .destructive) { send(HookOutput.deny(draft.reason)) }
+                Button(role: .destructive) { send(HookOutput.deny(draft.reason)) } label: { Text("Deny").frame(minWidth: 56) }
                     .keyboardShortcut(.delete, modifiers: .command).help("Deny (⌘⌫)")
                     .focused($focus)
-                Spacer()
+                if !pending.suggestions.isEmpty {
+                    Menu("Always allow…") {
+                        ForEach(Array(pending.suggestions.enumerated()), id: \.offset) { _, sug in
+                            Button(DisplayText.reveal(HookOutput.suggestionLabel(sug))) {
+                                guard draft.armed else { return }
+                                send(HookOutput.allowAlways(sug))
+                            }
+                        }
+                    }
+                    .fixedSize()
+                    .disabled(!draft.armed)
+                    .accessibilityHint(draft.armed ? "Saves a rule and allows" : armHint)
+                }
+                Spacer(minLength: 0)
+            }
+            HStack {
+                if draft.showReason {
+                    TextField("Reason for deny (optional)", text: $draft.reason).textFieldStyle(.roundedBorder)
+                        .focused($reasonFocused)
+                        .onAppear { reasonFocused = true }
+                } else {
+                    Button("Add a reason") { draft.showReason = true }.buttonStyle(.link).font(.callout)
+                        .accessibilityHint("Shows a field for a deny reason")
+                    Spacer()
+                }
                 Button("Answer in \(session.answerPlace)") { model.deferToTerminal(session.id, requestId: pending.id) }
+                    .buttonStyle(.link).font(.callout)
                     .keyboardShortcut("t", modifiers: .command).help("Answer in \(session.answerPlace) (⌘T)")
             }
         }
         .defaultFocus($focus, true)
         .onChange(of: pending.id, initial: true) { draft.reset(for: pending.id) }
+        .loadsContext(model, session, pending.id, draft)
     }
 
     /// Bound to the request this card shows, so a newer request is never answered by mistake.
     private func send(_ output: JSONValue) { model.answer(session.id, requestId: pending.id, output: output) }
+}
+
+extension PermissionDisplay.Risk {
+    var color: Color {
+        switch self {
+        case .sandboxOff: .red
+        case .writes: .orange
+        case .readOnly: .secondary
+        }
+    }
+}
+
+/// Full-width option row: hover, pressed, and selected states that read in light and dark mode.
+struct OptionRowStyle: ButtonStyle {
+    let selected: Bool
+    let hovered: Bool
+    let focused: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let fill: Color = selected ? Color.accentColor.opacity(configuration.isPressed ? 0.28 : 0.16)
+            : Color.primary.opacity(configuration.isPressed ? 0.12 : hovered ? 0.07 : 0.03)
+        configuration.label
+            .background(RoundedRectangle(cornerRadius: 10).fill(fill))
+            .overlay(RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(selected ? Color.accentColor : focused ? Color.accentColor.opacity(0.6) : Color.primary.opacity(0.12),
+                              lineWidth: selected || focused ? 1.5 : 1))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+    }
 }
 
 struct QuestionCard: View {
@@ -71,81 +201,276 @@ struct QuestionCard: View {
     let session: Session
     let pending: PendingRequest
     let questions: [AskQuestion]
-    let draft: BubbleSelection
-    private var picks: [Int: Set<String>] { draft.picks }
-    private var others: [Int: String] { draft.others }
+    @Bindable var draft: BubbleSelection
+    @FocusState private var otherFocused: Bool
 
-    private func answer(_ i: Int) -> String {
-        let q = questions[i]
-        let other = others[i] ?? ""
-        let chosen = q.options.map(\.label).filter { picks[i]?.contains($0) ?? false }
-        if !q.multiSelect && !other.trimmingCharacters(in: .whitespaces).isEmpty { return other.trimmingCharacters(in: .whitespaces) }
-        return HookOutput.answerText(selected: chosen, other: q.multiSelect ? other : "")
+    private var flow: QuestionFlow { draft.flow }
+
+    /// Preview panel beside the options; below them when the screen is narrow.
+    static func previewBeside(_ flow: QuestionFlow) -> Bool {
+        flow.current?.hasPreview == true && (NSScreen.main?.visibleFrame.width ?? 0) >= 900
     }
-
-    /// Answers are keyed by question text, so duplicate texts cannot be answered safely.
-    private var uniqueTexts: Bool { Set(questions.map(\.question)).count == questions.count }
-    private var complete: Bool { !questions.isEmpty && uniqueTexts && questions.indices.allSatisfy { !answer($0).isEmpty } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(Array(questions.enumerated()), id: \.offset) { i, q in questionView(i, q) }
-            if !uniqueTexts { WarningText(text: "Two questions have the same text. Answer in the terminal.") }
-            HStack {
-                Button("Submit") {
-                    var answers: [String: String] = [:]
-                    for i in questions.indices { answers[questions[i].question] = answer(i) }
-                    model.answer(session.id, requestId: pending.id, output: HookOutput.answer(toolInput: pending.toolInput, answers: answers))
-                }
-                .keyboardShortcut(.return, modifiers: .command).help("Submit (⌘↩)")
-                .disabled(!complete || !draft.armed)
-                .accessibilityHint(complete ? (draft.armed ? "" : armHint) : "Answer every question first")
-                Spacer()
-                Button("Answer in \(session.answerPlace)") { model.deferToTerminal(session.id, requestId: pending.id) }
-                    .keyboardShortcut("t", modifiers: .command).help("Answer in \(session.answerPlace) (⌘T)")
+            if flow.questions == questions {
+                ContextLine(requestId: pending.id, draft: draft)
+                if flow.count > 1 { tabs }
+                if flow.isReview { review } else if let q = flow.current { step(q) }
+                if !flow.uniqueTexts { WarningText(text: "Two questions have the same text. Answer in the terminal.") }
+                footer
             }
         }
-        .onChange(of: pending.id, initial: true) { draft.reset(for: pending.id) }
+        .onChange(of: pending.id, initial: true) {
+            draft.reset(for: pending.id, questions: questions)
+            draft.onKey = { [self] key, textFocused in handle(key, textFocused: textFocused) }
+        }
+        .onChange(of: draft.flow.step) { _, _ in
+            draft.hovered = nil
+            if flow.isReview { Announcer.say("Review your answers") }
+            else if let q = flow.current { Announcer.say("Question \(flow.progress): \(DisplayText.reveal(q.question))") }
+        }
+        .onDisappear { draft.onKey = nil }
+        .loadsContext(model, session, pending.id, draft)
     }
 
-    private func questionView(_ i: Int, _ q: AskQuestion) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let h = q.header { Text(DisplayText.reveal(h).uppercased()).font(.caption2.bold()).foregroundStyle(.secondary) }
-            Text(DisplayText.reveal(q.question)).font(.subheadline.bold()).accessibilityAddTraits(.isHeader)
-            if q.multiSelect {
-                ForEach(q.options, id: \.label) { o in
-                    Toggle(isOn: binding(i, o.label)) { optionLabel(o) }.toggleStyle(.checkbox)
+    // MARK: Parts
+
+    private var tabs: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(Array(questions.enumerated()), id: \.offset) { i, q in
+                    let current = flow.step == i
+                    let title = q.header.map { DisplayText.reveal($0) } ?? "Q\(i + 1)"
+                    Button { draft.flow.go(to: i) } label: {
+                        HStack(spacing: 4) {
+                            if flow.answered(i) { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
+                            Text(title).lineLimit(1)
+                        }
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, 9).padding(.vertical, 4)
+                        .background(Capsule().fill(current ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.06)))
+                        .overlay(Capsule().strokeBorder(current ? Color.accentColor : .clear))
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Question \(i + 1): \(title), \(flow.answered(i) ? "answered" : "not answered")")
+                    .accessibilityAddTraits(current ? .isSelected : [])
                 }
+            }
+        }
+    }
+
+    @ViewBuilder private func step(_ q: AskQuestion) -> some View {
+        let options = FitScroll(key: "q\(flow.step)", maxHeight: FitScroll<EmptyView>.screenCap, draft: draft) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(DisplayText.reveal(q.question)).font(.headline).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                if q.multiSelect { Text("Choose one or more.").font(.caption).foregroundStyle(.secondary) }
+                ForEach(Array(q.options.enumerated()), id: \.offset) { r, o in optionRow(q, r, o) }
+                otherRow(q)
+            }
+            .padding(.horizontal, 1)
+        }
+        if q.hasPreview {
+            if Self.previewBeside(flow) {
+                HStack(alignment: .top, spacing: 12) { options.frame(width: 352); preview(q) }
             } else {
-                Picker(DisplayText.reveal(q.question), selection: single(i)) {
-                    ForEach(q.options, id: \.label) { o in optionLabel(o).tag(o.label) }
-                }
-                .pickerStyle(.radioGroup)
-                .labelsHidden()
+                VStack(alignment: .leading, spacing: 8) { options; preview(q) }
             }
-            TextField("Other", text: Binding(get: { others[i] ?? "" }, set: { draft.others[i] = $0 }))
+        } else {
+            options
+        }
+    }
+
+    private func optionRow(_ q: AskQuestion, _ r: Int, _ o: AskQuestion.Option) -> some View {
+        let selected = flow.isPicked(flow.step, o.label)
+        let label = DisplayText.reveal(o.label)
+        let desc = o.description.map { DisplayText.reveal($0) }
+        return Button { choose(r) } label: {
+            HStack(alignment: .top, spacing: 10) {
+                badge(r)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label).font(.body.weight(.semibold))
+                    if let desc { Text(desc).font(.callout).foregroundStyle(.secondary) }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                mark(selected: selected, multi: q.multiSelect)
+            }
+            .padding(10)
+        }
+        .buttonStyle(OptionRowStyle(selected: selected, hovered: draft.hovered == r, focused: flow.cursor[flow.step] == r))
+        .onHover { inside in
+            if inside { draft.hovered = r } else if draft.hovered == r { draft.hovered = nil }
+        }
+        .accessibilityLabel(desc.map { "\(label). \($0)" } ?? label)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityHint(r < 9 ? "Option \(r + 1). Press \(r + 1) to choose." : "")
+    }
+
+    @ViewBuilder private func otherRow(_ q: AskQuestion) -> some View {
+        let r = q.options.count
+        let on = flow.otherOn.contains(flow.step)
+        Button { choose(r) } label: {
+            HStack(spacing: 10) {
+                badge(r)
+                Text("Other…").font(.body.weight(.semibold)).frame(maxWidth: .infinity, alignment: .leading)
+                mark(selected: on, multi: q.multiSelect)
+            }
+            .padding(10)
+        }
+        .buttonStyle(OptionRowStyle(selected: on, hovered: draft.hovered == r, focused: flow.cursor[flow.step] == r))
+        .onHover { inside in
+            if inside { draft.hovered = r } else if draft.hovered == r { draft.hovered = nil }
+        }
+        .accessibilityLabel("Other answer")
+        .accessibilityAddTraits(on ? .isSelected : [])
+        if on {
+            TextField("Type your answer", text: Binding(get: { draft.flow.others[flow.step] ?? "" },
+                                                         set: { draft.flow.others[draft.flow.step] = $0 }))
                 .textFieldStyle(.roundedBorder)
+                .focused($otherFocused)
                 .accessibilityLabel("Other answer for \(DisplayText.reveal(q.question))")
+                .accessibilityHint("Return confirms")
         }
     }
 
-    private func optionLabel(_ o: AskQuestion.Option) -> some View {
-        VStack(alignment: .leading) {
-            Text(DisplayText.reveal(o.label))
-            if let d = o.description { Text(DisplayText.reveal(d)).font(.caption).foregroundStyle(.secondary) }
+    private func badge(_ r: Int) -> some View {
+        Text(r < 9 ? "\(r + 1)" : "·")
+            .font(.caption.monospacedDigit().bold())
+            .foregroundStyle(.secondary)
+            .frame(width: 20, height: 20)
+            .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.08)))
+            .accessibilityHidden(true)
+    }
+
+    private func mark(selected: Bool, multi: Bool) -> some View {
+        Image(systemName: multi ? (selected ? "checkmark.square.fill" : "square") : (selected ? "checkmark.circle.fill" : "circle"))
+            .foregroundStyle(selected ? Color.accentColor : Color.secondary.opacity(0.6))
+            .font(.title3)
+            .accessibilityHidden(true)
+    }
+
+    /// The hovered row, else the keyboard row, else the selected one, else the first option with a preview.
+    private func preview(_ q: AskQuestion) -> some View {
+        let picked = q.options.firstIndex { flow.isPicked(flow.step, $0.label) }
+        let row = [draft.hovered, flow.cursor[flow.step], picked].compactMap { $0 }.first { $0 < q.options.count }
+            ?? q.options.firstIndex { $0.preview != nil }
+        let o = row.map { q.options[$0] }
+        let body = o?.preview.map { DisplayText.reveal($0.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.hasPrefix("```") }.joined(separator: "\n")) }
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(o.map { "Preview: \(DisplayText.reveal($0.label))" } ?? "Preview").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            ScrollView([.vertical, .horizontal]) {
+                Text(body ?? "No preview for this option.")
+                    .font(.system(.callout, design: .monospaced))
+                    .foregroundStyle(body == nil ? .secondary : .primary)
+                    .textSelection(.enabled)
+                    .fixedSize()
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(10)
+            }
+            .frame(minHeight: 120, maxHeight: 320)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.12)))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Preview")
+        .accessibilityValue(body ?? "No preview for this option.")
+    }
+
+    private var review: some View {
+        FitScroll(key: "review", maxHeight: FitScroll<EmptyView>.screenCap, draft: draft) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Review your answers").font(.headline).accessibilityAddTraits(.isHeader)
+                ForEach(Array(questions.enumerated()), id: \.offset) { i, q in
+                    let a = flow.answer(i)
+                    Button { draft.flow.go(to: i) } label: {
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(DisplayText.reveal(q.question)).font(.callout).foregroundStyle(.secondary)
+                                if a.isEmpty {
+                                    WarningText(text: "Not answered").font(.body.weight(.semibold))
+                                } else {
+                                    Text(DisplayText.reveal(a)).font(.body.weight(.semibold))
+                                }
+                            }
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            Image(systemName: "pencil").foregroundStyle(.secondary).accessibilityHidden(true)
+                        }
+                        .padding(10)
+                    }
+                    .buttonStyle(OptionRowStyle(selected: false, hovered: false, focused: false))
+                    .accessibilityLabel("\(DisplayText.reveal(q.question)): \(a.isEmpty ? "not answered" : DisplayText.reveal(a))")
+                    .accessibilityHint("Edits this answer")
+                }
+            }
+            .padding(.horizontal, 1)
         }
     }
 
-    private func binding(_ i: Int, _ label: String) -> Binding<Bool> {
-        Binding(get: { picks[i]?.contains(label) ?? false }, set: { on in
-            var set = picks[i] ?? []
-            if on { set.insert(label) } else { set.remove(label) }
-            draft.picks[i] = set
-        })
+    private var footer: some View {
+        HStack {
+            if flow.count > 1 {
+                Button("‹ Back") { draft.flow.back() }.disabled(flow.step == 0).help("Back (←)")
+                Spacer()
+            }
+            Button("Answer in \(session.answerPlace)") { model.deferToTerminal(session.id, requestId: pending.id) }
+                .buttonStyle(.link).font(.callout)
+                .keyboardShortcut("t", modifiers: .command).help("Answer in \(session.answerPlace) (⌘T)")
+            Spacer()
+            if flow.showsSubmit {
+                Button("Submit", action: submit)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.return, modifiers: .command).help("Submit (⌘↩)")
+                    .disabled(!flow.complete || !draft.armed)
+                    .accessibilityHint(flow.complete ? (draft.armed ? "" : armHint) : "Answer every question first")
+            } else {
+                Button(flow.isLastQuestion ? "Review" : "Next ›") { draft.flow.next() }
+                    .disabled(!flow.canAdvance).help("Next (Return)")
+                    .accessibilityHint(flow.canAdvance ? "" : "Answer this question first")
+            }
+        }
     }
 
-    private func single(_ i: Int) -> Binding<String> {
-        Binding(get: { picks[i]?.first ?? "" }, set: { draft.picks[i] = [$0] })
+    // MARK: Actions
+
+    /// Single choice moves on by itself after a short beat, except on the last question.
+    private func choose(_ row: Int) {
+        let step = flow.step
+        if draft.flow.pick(row) {
+            let request = pending.id
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(150))
+                if draft.requestId == request, draft.flow.step == step { draft.flow.next() }
+            }
+        }
+        if row == flow.current?.options.count, flow.otherOn.contains(step) {
+            Task { @MainActor in otherFocused = true }
+        }
+    }
+
+    private func submit() {
+        guard draft.armed, draft.flow.complete else { return }
+        model.answer(session.id, requestId: pending.id, output: HookOutput.answer(toolInput: pending.toolInput, answers: draft.flow.answers))
+    }
+
+    private func handle(_ key: QuestionKey, textFocused: Bool) -> Bool {
+        guard model.session(session.id)?.pending?.id == pending.id, draft.requestId == pending.id else { return false }
+        switch QuestionKeys.action(key, flow: draft.flow, textFocused: textFocused) {
+        case .pick(let r): choose(r)
+        case .back: draft.flow.back()
+        case .next: draft.flow.next()
+        case .cursor(let d): draft.flow.moveCursor(d)
+        case .primary:
+            if draft.flow.showsSubmit { submit() } else if draft.flow.canAdvance { draft.flow.next() }
+            if textFocused { otherFocused = false }
+        case .ignore: return false
+        }
+        return true
     }
 }
 
@@ -160,23 +485,46 @@ struct DoneCard: View {
         let route = desktopHeld ? .none : model.route(for: session)
         VStack(alignment: .leading, spacing: 8) {
             if let m = session.lastMessage?.trimmingCharacters(in: .whitespacesAndNewlines), !m.isEmpty {
-                if draft.expanded || m.count <= 280 {
-                    ScrollView { Text(m).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 240)
+                let long = m.count > 360 || m.split(separator: "\n").count > 6
+                let text = Text(draft.markdown(m)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if draft.expanded && long {
+                    FitScroll(key: "done", maxHeight: min(320, FitScroll<EmptyView>.screenCap), draft: draft) { text }
                 } else {
-                    Text(m.prefix(280) + "…")
+                    text.lineLimit(6)
                 }
-                if m.count > 280 { Button(draft.expanded ? "Show less" : "Show more") { draft.expanded.toggle() }.buttonStyle(.link) }
+                if long {
+                    Button(draft.expanded ? "Show less" : "Show more") { draft.expanded.toggle() }.buttonStyle(.link).font(.callout)
+                }
             }
-            HStack {
-                TextField("Next prompt", text: $draft.prompt).textFieldStyle(.roundedBorder).onSubmit(send)
-                    .disabled(route == .none).focused($promptFocused)
-                Button("Send", action: send).disabled(route == .none || draft.sending || draft.prompt.isEmpty)
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $draft.prompt)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .focused($promptFocused)
+                    .disabled(route == .none)
+                    .accessibilityLabel("Next prompt")
+                if draft.prompt.isEmpty {
+                    Text("Next prompt").foregroundStyle(.tertiary).padding(.leading, 5).allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
+            .frame(height: 64)
+            .padding(6)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(promptFocused ? Color.accentColor : Color.primary.opacity(0.15)))
+            HStack(alignment: .firstTextBaseline) {
+                if desktopHeld || (session.terminal == .claudeDesktop && route == .none) {
+                    WarningText(text: "Answer in Claude Desktop: Buddy cannot deliver a prompt to this session.")
+                } else {
+                    Text(routeText(route)).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Send", action: send)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.return, modifiers: .command).help("Send (⌘↩)")
+                    .disabled(route == .none || draft.sending || draft.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityHint(route == .none ? "Buddy cannot reach this terminal" : "")
-            }
-            if desktopHeld || (session.terminal == .claudeDesktop && route == .none) {
-                WarningText(text: "Answer in Claude Desktop: Buddy cannot deliver a prompt to this session.")
-            } else {
-                Text(routeText(route)).font(.caption).foregroundStyle(.secondary)
             }
             if route == .inbox && session.permissionMode == "bypassPermissions" {
                 WarningText(text: "This session runs in bypassPermissions mode. Claude may hold this message until you approve it in the terminal.")
@@ -187,12 +535,17 @@ struct DoneCard: View {
             JumpButton(model: model, session: session)
         }
         .defaultFocus($promptFocused, true)
+        // TextEditor ignores defaultFocus in this panel; ask again once the window has settled.
+        .task {
+            try? await Task.sleep(for: .milliseconds(100))
+            if route != .none { promptFocused = true }
+        }
     }
 
     private func routeText(_ r: PromptRoute) -> String {
         switch r {
-        case .editor(let name): "Types into the \(name) terminal as your input."
-        case .inbox: "Arrives as a peer message from another session, not as your own typing."
+        case .editor(let name): "Types into your \(name) terminal."
+        case .inbox: "Sends as a peer message."
         case .none: "Buddy cannot reach this terminal. Use Jump."
         }
     }

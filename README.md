@@ -122,6 +122,7 @@ Full steps and troubleshooting: [docs/INSTALL.md](docs/INSTALL.md).
 - **Pinning.** Drag a mascot to pin it. Double-click to unpin.
 - **Right-click menu.** Re-roll look, palette, outfit, Move to left/right edge, Jump and Hide.
 - **Modes.** One mascot per session (the default), or a single buddy with a badge and a session picker.
+- **Subagents and background shells.** Each running subagent shows as a mini copy of its buddy, next to it (at most 4, then `+N`). A `>_ N` chip counts running background shells. Click one to open the bubble's **Activity** tab: every subagent and shell with its state, running time, and the subagent's result. A subagent's permission request uses the normal card, named "(subagent)". Settings → General can turn off minis and the shell chip. After an update, click **Install hooks** again.
 - **Size.** Tiny 1x, Small 1.5x, Medium 2x (default), Large 3x, Huge 4x. Settings has a live preview.
 - **Settings tabs.** General, Size, Notifications, Hooks & Extension, Permissions, About. Notifications are set per event type.
 

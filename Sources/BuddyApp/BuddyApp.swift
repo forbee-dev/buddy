@@ -36,6 +36,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if Notifier.available { model.notifier = Notifier() }
         model.start()
         ReduceMotion.shared.start(model: model)
+        #if DEBUG
+        if Demo.on { Demo.start(model: model); return }
+        #endif
         // `--open-settings=<tab>` opens Settings at launch (support and screenshots).
         if let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--open-settings") }) {
             SettingsWindow.show(model: model, tab: SettingsTab(rawValue: String(arg.split(separator: "=").last ?? "")))

@@ -9,6 +9,8 @@ struct MascotSpec {
     var label: String
     var badge: Int
     var sleeping: Bool
+    var subagents: [Subagent] = []
+    var shells = 0
 }
 
 /// Reconciles mascots with sessions and runs the shared animation loop.
@@ -54,18 +56,26 @@ final class MascotDirector {
             return [MascotSpec(key: "sleep", sessionId: nil, state: .idle, look: look, label: "zzz", badge: 0, sleeping: true)]
         }
         if model.mode == .single {
-            guard let look = model.look(for: top) else { return [] }
+            // Single mode keeps the project look; per-session uniqueness is for several buddies.
+            guard let look = model.projectLook(cwd: top.cwd) else { return [] }
             let badge = visible.filter { $0.state.needsAttention || $0.state == .done }.count
             let label = visible.count == 1 ? top.projectName : "\(visible.count) sessions"
-            return [MascotSpec(key: "single", sessionId: top.id, state: top.state, look: look, label: label, badge: badge, sleeping: false)]
+            return [withActivity(MascotSpec(key: "single", sessionId: top.id, state: top.state, look: look, label: label, badge: badge, sleeping: false), top)]
         }
         return visible.compactMap { s in
             model.look(for: s).map {
-                MascotSpec(key: s.mascotKey, sessionId: s.id, state: s.state, look: $0,
-                           label: s.terminal == .claudeDesktop ? "\(s.projectName) · Claude Desktop" : s.projectName,
-                           badge: s.state == .done ? 1 : 0, sleeping: false)
+                withActivity(MascotSpec(key: s.mascotKey, sessionId: s.id, state: s.state, look: $0,
+                                        label: s.terminal == .claudeDesktop ? "\(s.projectName) · Claude Desktop" : s.projectName,
+                                        badge: s.state == .done ? 1 : 0, sleeping: false), s)
             }
         }
+    }
+
+    private func withActivity(_ spec: MascotSpec, _ s: Session) -> MascotSpec {
+        var spec = spec
+        if model.showMinis { spec.subagents = Array(s.subagents.values) }
+        if model.showShells { spec.shells = s.runningShells }
+        return spec
     }
 
     private func sleepLook(_ sheet: SpriteSheet) -> Look? {
@@ -101,7 +111,7 @@ final class MascotDirector {
         }
         relayoutGroup()
         for c in fresh { if let slot = slot(for: c) { c.setY(slot.y) } }
-        images.prune(keeping: Set(controllers.values.map(\.spec.look)))
+        images.prune(keeping: Set(controllers.values.flatMap { c in [c.spec.look, Look(base: c.spec.look.base, palette: c.spec.look.palette, outfit: nil)] }))
         wake()
     }
 
@@ -118,6 +128,10 @@ final class MascotDirector {
 
     func openBubble(sessionId: String) {
         controllers.values.first { $0.spec.sessionId == sessionId }?.showBubble(focus: true)
+    }
+
+    func openActivity(sessionId: String, highlight: String?, focus: Bool = true) {
+        controllers.values.first { $0.spec.sessionId == sessionId }?.showActivity(highlight: highlight, focus: focus)
     }
 
     /// Orders every mascot and bubble out (or back in) for "Hide buddies".
@@ -158,10 +172,14 @@ final class MascotDirector {
 
     private func groupBounds() -> NSRect { bounds(holding: currentAnchor()) }
 
+    /// Room left of each grouped buddy for its minis; the widest strip sets it for all slots.
+    private func stripRoom(_ members: [MascotController]) -> CGFloat { members.map(\.minis.width).max().map { $0 > 0 ? $0 + MiniStrip.gap : 0 } ?? 0 }
+
     private func currentLayout(_ members: [MascotController]) -> GroupLayout? {
         guard let first = members.first else { return nil }
         let a = currentAnchor()
-        return GroupLayout.layout(count: members.count, item: first.panelSize, spacing: CGFloat(model.size.groupSpacing),
+        let item = NSSize(width: first.panelSize.width + stripRoom(members), height: first.panelSize.height)
+        return GroupLayout.layout(count: members.count, item: item, spacing: CGFloat(model.size.groupSpacing),
                                   vertical: model.arrangement == .groupedVertical, anchor: a, bounds: bounds(holding: a))
     }
 
@@ -183,7 +201,8 @@ final class MascotDirector {
         for c in controllers.values where !list.contains(where: { $0 === c }) { c.setPosition(nil, of: 0) }
         guard let layout = currentLayout(list) else { slots = [:]; return }
         anchor = layout.anchor
-        slots = Dictionary(uniqueKeysWithValues: zip(list.map(\.key), layout.origins.map { NSPoint(x: $0.x, y: $0.y) }))
+        let room = stripRoom(list)
+        slots = Dictionary(uniqueKeysWithValues: zip(list.map(\.key), layout.origins.map { NSPoint(x: $0.x + room, y: $0.y) }))
         for (i, c) in list.enumerated() { c.setPosition(i + 1, of: list.count) }
     }
 

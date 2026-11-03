@@ -26,6 +26,7 @@ enum PrefKey {
     static let notifyPermission = "notify.permission", notifyQuestion = "notify.question", notifyDone = "notify.done"
     static let onboarded = "onboarded", looks = "lookOverrides", hotkey = "hotkey"
     static let size = "size", buddiesHidden = "buddiesHidden", arrangement = "arrangement"
+    static let showMinis = "minis.show", showShells = "minis.shells"
     static func anchor(_ a: Arrangement) -> String { "groupAnchor.\(a.rawValue)" }
 }
 

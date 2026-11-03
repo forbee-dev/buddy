@@ -279,3 +279,111 @@ Scratch `w2/t5.exp`, `t9.exp`, `settings-m4.json`. The hook replied late with `a
 - Hook answers first (no terminal answer): `allow` + `updatedPermissions` with `destination: localSettings` **does save** the rule to `<cwd>/.claude/settings.local.json` (`{"permissions":{"allow":["Bash(touch:*)"]}}`). TESTED (an earlier run where the key press missed the dialog). So "Always allow" in Buddy persists rules. That is why Buddy shows it only for Claude's own `permission_suggestions`.
 - `PermissionDenied` exists in 2.1.317 (event name is in the binary; its output can set `retry`). It did **not** fire for a user "No" in the terminal. It is probably for auto-mode classifier denials (UNTESTED). Buddy installs it (non-blocking) and clears the card on it.
 - Foreground check (for review H2): interactive claude shows `pgid == tpgid` and `stat` `S+`/`Ss+` (TESTED: `ps -o pid,pgid,tpgid,stat` at Stop).
+
+## Subagents and background shells
+
+Date: 2026-11-03. Claude Code 2.1.317. Headless tests (`claude -p`) with a logging hook on all events.
+Labels: **TESTED** / **DOCS** / **UNTESTED** as above. Not tested: interactive TTY, failed subagents, killed subagents.
+Test note: the user config sets a default agent, so main-session events showed `agent_type:"forgebee:orchestrator"`. Without a default agent the field is absent on main events (DOCS).
+
+### Q1. Events for subagents
+
+Verdict: `SubagentStart` and `SubagentStop` exist. TESTED. Other related events exist (DOCS): `TaskCreated`, `TaskCompleted` (agent teams and TaskCreate tasks, not Agent/Bash tasks), `PostToolBatch`. We registered `TaskCreated` and `TaskCompleted`. They did not fire in any test. Do not use them.
+
+Payloads (TESTED, redacted):
+```json
+{"hook_event_name":"SubagentStart","session_id":"<parent>","transcript_path":"<parent .jsonl>","cwd":"...","agent_id":"abc530428637b978a","agent_type":"general-purpose"}
+{"hook_event_name":"SubagentStop","session_id":"<parent>","transcript_path":"<parent .jsonl>","agent_transcript_path":".../<session_id>/subagents/agent-abc530428637b978a.jsonl","agent_id":"abc530428637b978a","agent_type":"general-purpose","stop_hook_active":false,"permission_mode":"acceptEdits","last_assistant_message":"Content: hello buddy","background_tasks":[],"session_crons":[]}
+```
+- `SubagentStart` keys: common fields + `agent_id`, `agent_type`. No `tool_use_id`, no description, no `permission_mode`, no prompt.
+- `SubagentStop` has `last_assistant_message`, `agent_transcript_path`, `background_tasks`, `session_crons` (both are the PARENT's lists).
+- `agent_id` format: `a` + 16 hex (`a6527e11be09810a5`). The DOCS example shows `agent-abc123`. Trust the real format, treat it as an opaque string.
+- No success/failure field on `SubagentStop`. A failed or killed subagent: UNTESTED. Docs show nothing for it. Plan for no "failed" signal from hooks.
+- Internal agents (prompt suggestions, `/btw`) also fire `SubagentStop`, with `agent_type` equal to the session agent or `""` (DOCS). Ignore a stop with an unknown `agent_id`. UNTESTED.
+- Plugin subagents report `agent_type:"plugin:name"` (DOCS).
+
+### Q2. Identity inside a subagent, and mapping to the Agent tool call
+
+Verdict: YES for identity, PARTIAL for the link. TESTED.
+- Every event fired inside a subagent (`PreToolUse`, `PostToolUse`, `PostToolBatch`, `PermissionRequest`) carries `agent_id` and `agent_type` (subagent type, e.g. `general-purpose`). `session_id` and `transcript_path` are the PARENT's. There is no `agent_transcript_path` and no parent `tool_use_id` on those events. The subagent's own tool calls have their own `tool_use_id`.
+- Subagent tool is named `"Agent"` in `tool_name` (not `Task`). TESTED. Match both `Agent` and `Task` to be safe (older name, UNTESTED).
+- `PreToolUse` Agent `tool_input` keys: `description`, `prompt`, `subagent_type`, `run_in_background`, `model`, `effort`. Keys are optional (`run_in_background` was absent when not set in some runs; the key list above is the union seen). `tool_use_id` is on the PreToolUse event.
+- Link `agent_id` to the Agent tool call. Two ways:
+  1. Exact, but only after the start (foreground: after the end). `PostToolUse` Agent `tool_response.agentId` = `agent_id`, same `tool_use_id` as the PreToolUse. Background: PostToolUse arrives 0.1 s after SubagentStart with `tool_response` `{"isAsync":true,"status":"async_launched","agentId":"...","description":"...","outputFile":"...","canContinueAgent":...}`. So for a background subagent the link is available within 100 ms.
+  2. Early: `PreToolUse` Agent is followed at once by `SubagentStart` (0.2 s later in every run). Take the pending Agent call (FIFO, per `session_id`) and give it the new `agent_id`. Parallel Agent calls in one batch could race. Fix the race when `PostToolUse` arrives: it holds the exact `agentId`.
+- Foreground `PostToolUse` Agent `tool_response` has `status:"completed"`, `agentId`, `agentType`, `totalDurationMs`, `totalTokens`, `totalToolUseCount`, `toolsUsed`, `content`. Do not copy `prompt` or `content`.
+
+### Q3. Background subagents timeline
+
+Verdict: observable. TESTED (t in seconds, one run):
+```
+91.9 PreToolUse  Agent (run_in_background)       parent
+92.1 SubagentStart a6527e11...                   
+92.2 PostToolUse Agent  status=async_launched    parent turn continues
+93.7 PreToolUse  Bash  (agent_id=a6527e11...)    inside the subagent
+96.4 Stop (parent)  background_tasks=[{id:"a6527e11be09810a5",type:"subagent",status:"running",description:"Run sleep and echo",agent_type:"general-purpose"}]
+106.7 PostToolUse Bash (subagent)
+108.7 SubagentStop a6527e11...                   parent already stopped
+109.1 UserPromptSubmit  prompt="<task-notification>...<task-id>a6527e11be09810a5</task-id>..."   parent wakes
+113.1 Stop (parent) background_tasks=[]
+```
+- The parent `Stop` fires while the subagent still runs. Its `background_tasks` lists the running subagent. The `id` equals `agent_id`.
+- Completion is observable: `SubagentStop`. Then the parent gets a synthetic `UserPromptSubmit` whose prompt starts with `<task-notification>` and holds `<task-id>`, `<tool-use-id>`, `<output-file>`, `<status>completed</status>`, `<summary>`. A second parent `Stop` follows. In `-p` mode the process stays alive until then. Interactive behaviour: UNTESTED, expect the same.
+- Buddy must NOT turn the parent to "idle/done" on `Stop` when `background_tasks` is not empty. Use `background_tasks` as the truth for "still busy".
+- `SubagentStop.background_tasks` still lists the finishing subagent itself as `running` (TESTED). Ignore that entry.
+
+### Q4. Background shells
+
+Verdict: observable, with a pid route. TESTED.
+- Start: `PreToolUse` Bash has `tool_input.run_in_background:true`. `PostToolUse` Bash `tool_response` = `{"stdout":"","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false,"backgroundTaskId":"by5x4bhvl"}`. The shell id is `tool_response.backgroundTaskId` (9 chars, opaque). The PostToolUse arrives at once (not at the exit).
+- While running: parent `Stop` and `SubagentStop` list it. Exact entry (TESTED):
+  `{"id":"by5x4bhvl","type":"shell","status":"running","description":"Sleep 6 seconds then print done","command":"sleep 6; echo shdone"}`
+  Fields: `id`, `type` (`shell`/`subagent`/`monitor`/`workflow`/`teammate`/`cloud session`/`MCP task`), `status`, `description` (max 1000), `command` (shell only, max 1000), `agent_type` (subagent only), `server`/`tool` (monitor, MCP), `name` (workflow). DOCS and TESTED for shell and subagent. Other `status` values than `running`: UNTESTED (finished tasks leave the array).
+- Finish: no dedicated hook event. Signals (all TESTED):
+  1. The task id leaves `background_tasks` on the next `Stop` / `SubagentStop`.
+  2. A synthetic parent `UserPromptSubmit` with `<task-notification><task-id>by5x4bhvl</task-id><tool-use-id>toolu_...</tool-use-id>...<status>completed</status><summary>Background command "..." completed...`. `<tool-use-id>` is the PreToolUse tool_use_id of the Bash call. Fires also for stop (status text for killed or failed: UNTESTED).
+- Tools: there is no `BashOutput`, `KillShell`, or `TaskOutput` in 2.1.317 (the model said none matched). The stop tool is `TaskStop` with `tool_input` `{"task_id":"baz29seig"}`. Its `PostToolUse` `tool_response` = `{"message":"Successfully stopped task: baz29seig (sleep 40; echo never)","task_id":"...","task_type":"local_bash","command":"..."}`. A stopped shell shows in `PostToolUse TaskStop` (hook event), and the later `Stop` has `background_tasks:[]`. The model reads output from the file `<scratch>/<session>/tasks/<id>.output` (path in `<output-file>`), with plain Bash.
+- Pid for liveness: YES. TESTED with `CLAUDE_PID` (hook env) and `ps`. Tree at PostToolUse: `claude(CLAUDE_PID) -> /bin/zsh -c source ~/.claude/shell-snapshots/snapshot-zsh-... && eval '<command>' -> sleep 40`. So the shell is a DIRECT CHILD of `CLAUDE_PID`, with the command text in its argv (truncated to 90 chars in our log). Find it by `ppid == CLAUDE_PID` and argv contains the `command`. Match on a new child since the PreToolUse snapshot when the commands repeat. The task id is NOT in argv as far as we logged (UNTESTED for the full argv). A pid check is a nice-to-have. The `background_tasks` list is better: it is exact and needs no `ps`.
+- A background shell started INSIDE a subagent is also a child of `CLAUDE_PID` (same process). UNTESTED for pid. Its `PostToolUse` carries `agent_id` (PreToolUse/PostToolUse of Bash in subagent had `agent_id`, TESTED for foreground Bash).
+
+### Q5. PermissionRequest inside a subagent
+
+Verdict: YES, same as top-level. TESTED (`--permission-mode default`, Bash not allowed, subagent ran `touch`):
+- Payload keys: `agent_id`, `agent_type`, `cwd`, `effort`, `hook_event_name`, `permission_mode`, `permission_suggestions`, `prompt_id`, `session_id`, `tool_input`, `tool_name`, `transcript_path`. No `tool_use_id` (as for top-level). The pair `agent_id` + `agent_type` is the only attribution.
+- Hook answered `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`. The subagent's Bash ran and the file was created. Deny from a subagent hook: UNTESTED (expect it to work as in section 2).
+- Order: PreToolUse (subagent) 140.19, PermissionRequest 140.52, PostToolUse 140.72. Notification `permission_prompt` did not fire in `-p`. Whether it carries `agent_id` is UNTESTED.
+- Pairing a card with the tool call: `PermissionRequest` has no `tool_use_id`. Use `agent_id` + `tool_name` + `tool_input`, and the preceding `PreToolUse` with the same `agent_id`. At most one pending permission per subagent, so `agent_id` is enough.
+
+### Q6. `agent_type` values
+
+TESTED:
+| Event source | `agent_type` |
+|---|---|
+| Main session, no default agent | field absent (DOCS) |
+| Main session with `--agent X` or `agent` setting | `X` (seen: `forgebee:orchestrator`), also on SessionStart |
+| Inside a subagent (any hook incl. SubagentStart/Stop) | subagent type: `general-purpose` (also `Explore`, `Plan`, custom `name`, `plugin:name`) |
+| Internal agent SubagentStop (DOCS) | session agent name or `""` |
+`agent_type` alone cannot tell main from subagent. Use `agent_id`: present only inside a subagent (absent on all main events, TESTED).
+
+### Design impact for Buddy
+
+Register hooks: `PreToolUse`, `PostToolUse`, `PermissionRequest`, `SubagentStart`, `SubagentStop`, `Stop`, `UserPromptSubmit` (already listed in section 1). `PostToolUse` must be unfiltered (matchers `Agent|Task|Bash|TaskStop` are enough for Buddy; `PreToolUse` may use `Agent|Task`).
+
+(a) Subagent rows, state running / needs-permission / done / failed:
+- Create: `SubagentStart` (`session_id`, `agent_id`, `agent_type`). Label: the `description` from the latest pending `PreToolUse` Agent in the same session (fill in `agentId` from `PostToolUse` Agent `tool_response.agentId`; use `tool_input.run_in_background` for a bg badge).
+- running: after `SubagentStart`. Any event with this `agent_id` also proves it is alive.
+- needs-permission: `PermissionRequest` with `agent_id`. Clear on the next `PostToolUse`/`PreToolUse`/`SubagentStop` with the same `agent_id`, or when Buddy answers.
+- done: `SubagentStop` (`last_assistant_message` for a short result). Remove when the parent `Stop` shows `background_tasks` without the id and the row is old, or on `SessionEnd`.
+- failed: NO hook signal found (UNTESTED). Best effort: parent `PostToolUse Agent` `tool_response.status != "completed"` (foreground), or `PostToolUseFailure` for the Agent call. Show "done" otherwise. Safety net for stuck rows: parent `Stop` whose `background_tasks` lacks the `agent_id` => finished.
+- Do not mark the parent mascot idle while `background_tasks` is non-empty.
+
+(b) Background shell rows:
+- Create: `PostToolUse` Bash whose `tool_input.run_in_background` is true. Key = `tool_response.backgroundTaskId`. Label = `tool_input.description` (fallback: first 40 chars of `tool_input.command`). Owner = `agent_id` if present, else the parent session.
+- running: id in `background_tasks` of the last `Stop`/`SubagentStop` (type `shell`), or no finish signal yet.
+- finished: any of: id missing from a later `background_tasks`; synthetic `UserPromptSubmit` starting with `<task-notification>` with `<task-id>` = the id (parse `<status>`); `PostToolUse TaskStop` with `tool_input.task_id` (show "stopped"). Hide the `<task-notification>` prompt from the "last prompt" text on the card.
+- Optional liveness: `ps` child of `CLAUDE_PID` matching `command`. Skip in v1.
+- Gap: a shell that ends while the parent is mid-turn gives a finish signal only at the next `Stop`, or at the `<task-notification>` prompt (both come within about 1 s of the exit in the tests).
+
+(c) Attribute permission cards: put `agent_id` and `agent_type` from `PermissionRequest` into the card (title "<agent_type> subagent wants to run Bash"). Look up the row by `agent_id`. Answer with the same JSON as for a top-level request.
+
+Test files (scratch, not in the app): `scratchpad/w-sub/` (`log.py`, `ps.py`, `perm.py`, `settings*.json`, `ev1-3.jsonl`).

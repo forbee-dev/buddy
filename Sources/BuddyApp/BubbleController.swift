@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 import BuddyCore
 
@@ -10,11 +11,27 @@ final class BubbleSelection {
     var sessionId: String?
     var requestId: String?
     var reason = ""
-    var picks: [Int: Set<String>] = [:]
-    var others: [Int: String] = [:]
+    var showReason = false
+    var flow = QuestionFlow()
+    /// Option row under the pointer, for the preview panel.
+    var hovered: Int?
+    /// Context line for `requestId` (what Claude said before the request).
+    var context: (id: String, text: String)?
+    var contextExpanded = false
+    /// Measured content heights, so long content scrolls instead of growing past the screen.
+    var heights: [String: CGFloat] = [:]
     var prompt = ""
     var expanded = false
     var sending = false
+    /// The tab the user picked, valid while `tabFor` is still the pending request id (a new request shows its card).
+    var tab: BubbleTab?
+    var tabFor: String?
+    /// Activity row to mark (the clicked mini).
+    var highlight: String?
+    var shownResults: Set<String> = []
+    /// Set by the question card. Gets plain keys (no ⌘/⌃/⌥) while the bubble is key; returns true when it used the key.
+    @ObservationIgnored var onKey: (@MainActor (QuestionKey, _ textFocused: Bool) -> Bool)?
+    @ObservationIgnored private var markdownCache: (source: String, text: AttributedString)?
     /// Allow / Always / Submit stay disabled until 700 ms after the card appears, changes, or stops moving (H1, S2).
     var armed = false
     @ObservationIgnored private var armAt = Date.distantPast
@@ -39,13 +56,24 @@ final class BubbleSelection {
     }
 
     /// Clears answers typed for an older request.
-    func reset(for request: String?) {
+    func reset(for request: String?, questions: [AskQuestion] = []) {
         guard request != requestId else { return }
         requestId = request
         disarm()
+        clearRequestState()
+        flow = QuestionFlow(questions)
+        #if DEBUG
+        if let request, let preset = Demo.presets[request] { preset(&flow) }
+        #endif
+    }
+
+    private func clearRequestState() {
         reason = ""
-        picks = [:]
-        others = [:]
+        showReason = false
+        flow = QuestionFlow()
+        hovered = nil
+        context = nil
+        contextExpanded = false
     }
 
     /// Picker or mascot moved to another session: nothing typed for the old one carries over (C5).
@@ -53,12 +81,13 @@ final class BubbleSelection {
         guard sid != sessionId else { return }
         sessionId = sid
         requestId = nil
-        reason = ""
-        picks = [:]
-        others = [:]
+        clearRequestState()
         prompt = ""
         expanded = false
         sending = false
+        tab = nil
+        highlight = nil
+        shownResults = []
         disarm()
     }
 
@@ -68,6 +97,18 @@ final class BubbleSelection {
         let stats = PermissionDisplay.stats(text)
         detailCache = (p.id, text, stats.lines, stats.chars)
         return (text, stats.lines, stats.chars)
+    }
+
+    /// Last message as inline markdown, built once per text. Links are removed so nothing opens from a click.
+    func markdown(_ raw: String) -> AttributedString {
+        if let c = markdownCache, c.source == raw { return c.text }
+        let shown = DisplayText.reveal(raw)
+        var text = (try? AttributedString(markdown: shown, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(shown)
+        let linked = text.runs.filter { $0.link != nil }.map(\.range)
+        for r in linked { text[r].link = nil }
+        markdownCache = (raw, text)
+        return text
     }
 }
 
@@ -80,6 +121,8 @@ final class BubbleController {
     private var anchor = NSRect.zero
     private var lastSize = NSSize.zero
     private var lastPlacement: BubblePlacement?
+    private var keyMonitor: Any?
+    private var resizeObserver: NSObjectProtocol?
 
     init(model: AppModel, sessionId: String?, single: Bool, onClose: @escaping () -> Void) {
         self.selection = BubbleSelection(sessionId)
@@ -89,6 +132,44 @@ final class BubbleController {
         host.sizingOptions = [.preferredContentSize]
         panel.contentViewController = host
         panel.level = .floating
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
+            nonisolated(unsafe) let event = e  // local monitors run on the main thread
+            let used = MainActor.assumeIsolated { self?.handleKey(event) ?? false }
+            return used ? nil : e
+        }
+        // The card grows from its bottom edge; place it again so it stays on screen.
+        resizeObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: panel, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.anchor != .zero else { return }
+                self.follow(self.anchor, placement: self.lastPlacement)
+            }
+        }
+    }
+
+    /// True when the question card used the key.
+    private func handleKey(_ e: NSEvent) -> Bool {
+        guard e.window === panel, let onKey = selection.onKey,
+              e.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return false }
+        let editor = panel.firstResponder as? NSTextView
+        // Return during IME composition confirms the composition, not the card.
+        if editor?.hasMarkedText() == true { return false }
+        guard let key = Self.questionKey(e) else { return false }
+        return onKey(key, editor != nil)
+    }
+
+    static func questionKey(_ e: NSEvent) -> QuestionKey? {
+        switch Int(e.keyCode) {
+        case kVK_LeftArrow: return .left
+        case kVK_RightArrow: return .right
+        case kVK_UpArrow: return .up
+        case kVK_DownArrow: return .down
+        case kVK_Tab: return .tab(shift: e.modifierFlags.contains(.shift))
+        case kVK_Space: return .space
+        case kVK_Return, kVK_ANSI_KeypadEnter: return .returnKey
+        default:
+            guard let c = e.charactersIgnoringModifiers, c.count == 1, let d = Int(c) else { return nil }
+            return .digit(d)
+        }
     }
 
     func show(focus: Bool) {
@@ -99,6 +180,12 @@ final class BubbleController {
     }
 
     func retarget(_ sid: String) { selection.switchTo(sid) }
+
+    func showActivity(highlight: String?) {
+        selection.tab = .activity
+        selection.tabFor = selection.sessionId.flatMap { AppModel.shared.session($0)?.pending?.id }
+        selection.highlight = highlight
+    }
 
     func follow(_ sprite: NSRect, placement: BubblePlacement? = nil) {
         guard sprite != anchor || panel.frame.size != lastSize || placement != lastPlacement else { return }
@@ -120,12 +207,15 @@ final class BubbleController {
             if y + size.height > screen.maxY { y = max(screen.minY, sprite.minY - size.height - 4) }
         }
         x = min(max(x, screen.minX + 4), screen.maxX - size.width - 4)
+        y = max(min(y, screen.maxY - size.height), screen.minY)
         panel.setFrameOrigin(NSPoint(x: x, y: y))
         // A moving card must not take a click aimed at something else (review S2).
         if moved { selection.disarm() }
     }
 
     func close() {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
+        if let resizeObserver { NotificationCenter.default.removeObserver(resizeObserver); self.resizeObserver = nil }
         panel.orderOut(nil)
         onClose()
     }

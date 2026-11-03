@@ -16,6 +16,12 @@ struct MenuContent: View {
             .keyboardShortcut("b")
             .help(model.buddiesHidden ? "Show buddies (⌘B)" : "Hide buddies (⌘B)")
             Divider()
+            if model.hooksOutdated {
+                Button { SettingsWindow.show(model: model, tab: .hooks) } label: {
+                    WarningText(text: "New hook events available: click Install hooks")
+                }
+                .help("Opens Settings → Hooks")
+            }
             buddies
             Divider()
             Button("Settings…") { SettingsWindow.show(model: model) }.keyboardShortcut(",")
@@ -58,6 +64,7 @@ struct BuddyRow: View {
                             Circle().fill(session.state.color).frame(width: 7, height: 7).accessibilityHidden(true)
                             Text(session.state.label)
                             Text("· \(session.terminal.displayName)").foregroundStyle(.secondary)
+                            if !activity.isEmpty { Text(activity).foregroundStyle(.secondary) }
                             if session.hidden { Text("· hidden").foregroundStyle(.secondary) }
                         }
                         .font(.caption)
@@ -66,7 +73,7 @@ struct BuddyRow: View {
                 }
                 .contentShape(Rectangle())
             }
-            .accessibilityLabel("\(session.projectName), \(session.state.label), \(session.terminal.displayName)")
+            .accessibilityLabel("\(session.projectName), \(session.state.label), \(session.terminal.displayName)\(activity)")
             .accessibilityHint("Opens this buddy's bubble")
             Menu {
                 Button("Jump to session") { model.jump(session.id) }
@@ -83,6 +90,12 @@ struct BuddyRow: View {
             .fixedSize()
             .accessibilityLabel("Actions for \(session.projectName)")
         }
+    }
+
+    /// "· 2 agents · 1 shell" for running ones; empty when none run.
+    private var activity: String {
+        let a = session.activeSubagents, sh = session.runningShells
+        return (a > 0 ? " · \(a) agent\(a == 1 ? "" : "s")" : "") + (sh > 0 ? " · \(sh) shell\(sh == 1 ? "" : "s")" : "")
     }
 
     @ViewBuilder private var thumbnail: some View {

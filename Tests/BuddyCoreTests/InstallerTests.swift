@@ -13,7 +13,7 @@ import Testing
         let perm = try #require((hooks["PermissionRequest"] as? [[String: Any]])?.first?["hooks"] as? [[String: Any]])
         #expect(perm.first?["timeout"] as? Int == 3600)
         let pre = try #require((hooks["PreToolUse"] as? [[String: Any]])?.first)
-        #expect(pre["matcher"] as? String == "AskUserQuestion")
+        #expect(pre["matcher"] as? String == "AskUserQuestion|Agent|Task")
         let stop = try #require((hooks["Stop"] as? [[String: Any]])?.first?["hooks"] as? [[String: Any]])
         #expect(stop.first?["timeout"] as? Int == 5)
     }

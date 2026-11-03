@@ -18,6 +18,8 @@ final class AppModel {
     var sheetError: String?
     var installMessage: String? { didSet { if let m = installMessage { Announcer.say(m) } } }
     var hooksInstalled = false
+    /// Buddy hooks exist but lack events this version uses.
+    var hooksOutdated = false
     private(set) var editorsConnected: [String] = []
     /// Per-session result line for the "Next prompt" box.
     var sendStatus: [String: String] = [:]
@@ -31,6 +33,8 @@ final class AppModel {
     /// All mascot and bubble panels ordered out; menu and notifications keep working.
     var buddiesHidden: Bool { didSet { defaults.set(buddiesHidden, forKey: PrefKey.buddiesHidden); director?.applyHidden() } }
     var sleepMascot: Bool { didSet { defaults.set(sleepMascot, forKey: PrefKey.sleepMascot); changed() } }
+    var showMinis: Bool { didSet { defaults.set(showMinis, forKey: PrefKey.showMinis); changed() } }
+    var showShells: Bool { didSet { defaults.set(showShells, forKey: PrefKey.showShells); changed() } }
     var notifyPermission: Bool { didSet { defaults.set(notifyPermission, forKey: PrefKey.notifyPermission) } }
     var notifyQuestion: Bool { didSet { defaults.set(notifyQuestion, forKey: PrefKey.notifyQuestion) } }
     var notifyDone: Bool { didSet { defaults.set(notifyDone, forKey: PrefKey.notifyDone) } }
@@ -43,6 +47,9 @@ final class AppModel {
     @ObservationIgnored private var removals: Set<String> = []
     @ObservationIgnored private var reaper: Timer?
     @ObservationIgnored private var lookCache: [String: Look] = [:]
+    @ObservationIgnored private var lookBook = LookBook()
+    /// Card context line per request id ("" = nothing to show).
+    @ObservationIgnored var contextCache: [String: String] = [:]
     @ObservationIgnored private lazy var expectedHookPath: String? =
         Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("buddy-hook").path
     @ObservationIgnored let ext = ExtensionHub()
@@ -58,6 +65,8 @@ final class AppModel {
             ?? (d.object(forKey: PrefKey.scale) != nil ? .migrate(scale: d.integer(forKey: PrefKey.scale)) : .medium)
         buddiesHidden = d.bool(forKey: PrefKey.buddiesHidden)
         sleepMascot = d.bool(PrefKey.sleepMascot, default: true)
+        showMinis = d.bool(PrefKey.showMinis, default: true)
+        showShells = d.bool(PrefKey.showShells, default: true)
         notifyPermission = d.bool(PrefKey.notifyPermission, default: true)
         notifyQuestion = d.bool(PrefKey.notifyQuestion, default: true)
         notifyDone = d.bool(PrefKey.notifyDone, default: false)
@@ -71,6 +80,9 @@ final class AppModel {
     /// Points per sprite pixel for the main screen.
     var pointScale: CGFloat {
         CGFloat(size.pointsPerPixel(backingScale: Double(NSScreen.main?.backingScaleFactor ?? 2)))
+    }
+    var miniScale: CGFloat {
+        CGFloat(size.miniPointsPerPixel(backingScale: Double(NSScreen.main?.backingScaleFactor ?? 2)))
     }
     func session(_ id: String) -> Session? { store.sessions[id] }
     var onboarded: Bool {
@@ -90,11 +102,24 @@ final class AppModel {
             guard let self else { return }
             self.editorsConnected = self.ext.connectedEditors
         }
-        startServer()
+        #if DEBUG
+        let demo = Demo.on
+        #else
+        let demo = false
+        #endif
+        // The demo never opens the socket, so it runs next to an installed Buddy and gets no real hooks.
+        if !demo { startServer() }
         director = MascotDirector(model: self)
         director?.sync()
-        Hotkey.shared.apply(hotkey)
+        if !demo { Hotkey.shared.apply(hotkey) }
     }
+
+    #if DEBUG
+    func applyDemo(_ msg: HookMessage) {
+        _ = store.apply(msg, isAlive: { _ in true })
+        if let sid = msg.payload["session_id"]?.string { afterChange(sid, before: nil) }
+    }
+    #endif
 
     private func loadSprites() {
         let candidates = [Bundle.main.url(forResource: "sprites", withExtension: "json"),
@@ -109,6 +134,7 @@ final class AppModel {
             log.error("sprites.json invalid: \(String(describing: error), privacy: .public)")
         }
         lookCache.removeAll()
+        lookBook.clear()
     }
 
     private func startServer() {
@@ -286,27 +312,57 @@ final class AppModel {
     func showNote(_ sid: String, _ note: String) { store.setNote(sid, note); changed() }
     func setHidden(_ sid: String, _ hidden: Bool) { store.setHidden(sid, hidden); changed() }
 
-    // MARK: Looks (cached per cwd)
+    // MARK: Looks
 
-    func look(for s: Session) -> Look? {
-        if let hit = lookCache[s.cwd] { return hit }
+    /// The project's look: the user's override for this cwd, else the cwd hash. Cached per cwd.
+    func projectLook(cwd: String) -> Look? {
+        if let hit = lookCache[cwd] { return hit }
         guard let sheet else { return nil }
-        var look = LookPicker.pick(cwd: s.cwd, sheet: sheet)
-        if let o = UserDefaults.standard.lookOverrides[s.cwd] {
+        var look = LookPicker.pick(cwd: cwd, sheet: sheet)
+        if let o = UserDefaults.standard.lookOverrides[cwd] {
             if sheet.palettes[o.palette] != nil { look.palette = o.palette }
             if o.outfit == nil || sheet.outfits[o.outfit ?? ""] != nil { look.outfit = o.outfit }
         }
-        lookCache[s.cwd] = look
+        lookCache[cwd] = look
         return look
     }
 
-    func setLook(cwd: String, palette: String? = nil, outfit: String?? = nil) {
-        guard let sheet else { return }
-        var all = UserDefaults.standard.lookOverrides
-        let base = all[cwd] ?? LookPicker.pick(cwd: cwd, sheet: sheet)
-        all[cwd] = Look(base: base.base, palette: palette ?? base.palette, outfit: outfit ?? base.outfit)
-        UserDefaults.standard.lookOverrides = all
-        lookCache.removeAll()
+    /// Mascot keys of sessions with a buddy on screen.
+    private var visibleLookKeys: Set<String> {
+        Set(store.sessions.values.filter { !$0.hidden && $0.state != .ended }.map(\.mascotKey))
+    }
+
+    /// The session's own look, set once when first asked for and unique among visible buddies.
+    func look(for s: Session) -> Look? {
+        guard let sheet, let preferred = projectLook(cwd: s.cwd) else { return nil }
+        if lookBook.looks[s.mascotKey] == nil { lookBook.keep(Set(store.sessions.values.map(\.mascotKey))) }
+        return lookBook.look(for: s.mascotKey, preferred: preferred, seed: s.cwd, visible: visibleLookKeys, sheet: sheet)
+    }
+
+    /// Palettes that other visible buddies wear.
+    func palettesInUse(except s: Session) -> Set<String> {
+        Set(lookBook.taken(except: s.mascotKey, visible: visibleLookKeys).map(\.palette))
+    }
+
+    func rerollLook(_ s: Session) {
+        guard let sheet, let current = look(for: s) else { return }
+        var rng = SystemRandomNumberGenerator()
+        let next = LookAssigner.reroll(current: current, taken: lookBook.taken(except: s.mascotKey, visible: visibleLookKeys),
+                                       sheet: sheet, using: &rng)
+        setLook(s, palette: next.palette, outfit: .some(next.outfit))
+    }
+
+    /// Changes this buddy only. When it wears the project look, the change also becomes the project's look.
+    func setLook(_ s: Session, palette: String? = nil, outfit: String?? = nil) {
+        guard let sheet, let current = look(for: s) else { return }
+        lookBook.set(s.mascotKey, Look(base: current.base, palette: palette ?? current.palette, outfit: outfit ?? current.outfit))
+        if current == projectLook(cwd: s.cwd) {
+            var all = UserDefaults.standard.lookOverrides
+            let base = all[s.cwd] ?? LookPicker.pick(cwd: s.cwd, sheet: sheet)
+            all[s.cwd] = Look(base: base.base, palette: palette ?? base.palette, outfit: outfit ?? base.outfit)
+            UserDefaults.standard.lookOverrides = all
+            lookCache[s.cwd] = nil
+        }
         director?.rebuild()
     }
 }

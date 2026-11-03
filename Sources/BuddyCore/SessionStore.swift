@@ -16,6 +16,8 @@ public struct PendingRequest: Sendable, Equatable {
     public var toolUseId: String?
     public var toolInput: JSONValue
     public var suggestions: [JSONValue]
+    /// Set when a subagent asks. Its requests carry no `tool_use_id`, so matching stays inside this agent.
+    public var agentId: String?
 }
 
 public struct Session: Sendable, Identifiable {
@@ -23,16 +25,32 @@ public struct Session: Sendable, Identifiable {
     /// Survives re-keying (clear/compact/resume) so the mascot stays the same.
     public var mascotKey: String
     public var cwd: String
-    public var state: SessionState
+    /// The main conversation's own state; subagent events never set it.
+    public var mainState: SessionState
+    /// What the buddy shows: the main state, or attention while a subagent's card waits for the user.
+    public var state: SessionState {
+        get {
+            guard let p = pending, p.agentId != nil else { return mainState }
+            return p.kind == .question ? .asking : .needsPermission
+        }
+        set { mainState = newValue }
+    }
     public var env: HookEnv
     public var lastMessage: String?
     public var lastError: String?
     public var pending: PendingRequest?
     public var hidden: Bool
     public var permissionMode: String?
+    /// From the hook payload; read only through `TranscriptTail`, which validates it.
+    public var transcriptPath: String?
     /// Short status shown on the card, e.g. "Answered in terminal".
     public var note: String?
     public var updated: Date
+    public var subagents: [String: Subagent] = [:]
+    public var shells: [String: Shell] = [:]
+    /// Agent tool calls waiting for their SubagentStart, oldest first.
+    var agentCalls: [AgentCall] = []
+    var mainPending: PendingRequest? { pending?.agentId == nil ? pending : nil }
 
     public var projectName: String {
         let name = (cwd as NSString).lastPathComponent
@@ -72,11 +90,18 @@ public struct SessionStore: Sendable {
             return StoreChange()
         }
         var s = sessions[sid] ?? newSession(sid, msg, now: now)
-        if let cwd = p["cwd"]?.string { s.cwd = cwd }
-        if let mode = p["permission_mode"]?.string { s.permissionMode = mode }
+        let agent = p["agent_id"]?.string
+        if agent == nil {
+            if let cwd = p["cwd"]?.string { s.cwd = cwd }
+            if let mode = p["permission_mode"]?.string { s.permissionMode = mode }
+            if let t = p["transcript_path"]?.string { s.transcriptPath = t }
+        }
         if event == "SessionStart" { s.env = Self.routingEnv(msg.env) }
         s.updated = now
-        transition(&s, event: event, msg: msg, change: &change)
+        s.trackTools(event: event, p, now: now)
+        if let agent { subagentEvent(&s, agent: agent, event: event, msg: msg, change: &change, now: now) }
+        else { transition(&s, event: event, msg: msg, change: &change, now: now) }
+        s.pruneActivity(now: now)
         sessions[sid] = s
         return change
     }
@@ -88,16 +113,19 @@ public struct SessionStore: Sendable {
         return event == "SessionStart" && !isAlive(old)
     }
 
-    private func transition(_ s: inout Session, event: String, msg: HookMessage, change: inout StoreChange) {
+    /// Main-session events only (no `agent_id`).
+    private func transition(_ s: inout Session, event: String, msg: HookMessage, change: inout StoreChange, now: Date) {
         let p = msg.payload
         let tool = p["tool_name"]?.string
         switch event {
         case "SessionStart":
             s.state = .starting
         case "UserPromptSubmit":
-            clearPending(&s, &change, note: nil); s.state = .working; s.lastError = nil
+            if s.mainPending != nil { clearPending(&s, &change, note: nil) }
+            s.state = .working; s.lastError = nil
+            if let task = p["task_id"]?.string { s.applyTaskNotification(task, now: now) }
         case "PreToolUse":
-            if tool == "AskUserQuestion", s.pending == nil { s.state = .asking }
+            if tool == "AskUserQuestion", s.mainPending == nil { s.state = .asking }
         case "PermissionRequest":
             clearPending(&s, &change, note: nil)
             // Hidden sessions are never held: the app replies null at once (review M5).
@@ -107,37 +135,70 @@ public struct SessionStore: Sendable {
             s.note = nil
         case "PermissionDenied":
             if matches(s.pending, p) { clearPending(&s, &change, note: "Denied") }
-            if s.pending == nil { s.state = .working }
+            if s.mainPending == nil { s.state = .working }
         case "PostToolUse", "PostToolUseFailure":
             if matches(s.pending, p) { clearPending(&s, &change, note: "Answered in terminal") }
-            if s.pending == nil { s.state = event == "PostToolUse" ? .working : .error }
+            if s.mainPending == nil { s.state = event == "PostToolUse" ? .working : .error }
             if event == "PostToolUseFailure" { s.lastError = p["error"]?.string }
         case "Notification":
             applyNotification(&s, type: p["notification_type"]?.string)
         case "Stop":
-            clearPending(&s, &change, note: nil)
+            if s.mainPending != nil { clearPending(&s, &change, note: nil) }
             s.state = .done
             if let m = p["last_assistant_message"]?.string { s.lastMessage = m }
+            s.applyBackgroundTasks(p["background_tasks"], now: now)
+            s.agentCalls = []
         case "SessionEnd":
             clearPending(&s, &change, note: nil)
             // clear/resume keep the claude process; a SessionStart with a new id follows.
             let reason = p["reason"]?.string
             s.state = (reason == "clear" || reason == "resume") ? .idle : .ended
+            s.endActivity(now: now)
         default:
             break
         }
     }
 
-    /// Same tool_use_id when both sides have one; the tool name otherwise.
+    /// Events fired inside a subagent. They change its record and its card, never the main state.
+    private func subagentEvent(_ s: inout Session, agent: String, event: String, msg: HookMessage,
+                               change: inout StoreChange, now: Date) {
+        let p = msg.payload
+        let tool = p["tool_name"]?.string
+        switch event {
+        case "SubagentStart":
+            guard s.subagents[agent] == nil else { break }
+            let call = s.agentCalls.isEmpty ? nil : s.agentCalls.removeFirst()
+            s.subagents[agent] = Subagent(id: agent, type: Activity.clip(p["agent_type"]?.string ?? "", 40), call: call, startedAt: now)
+        case "SubagentStop":
+            if s.pending?.agentId == agent { clearPending(&s, &change, note: nil) }
+            s.setSubagent(agent, .done, now: now)
+            if let m = p["last_assistant_message"]?.string { s.subagents[agent]?.lastMessage = Activity.clip(m, 300) }
+        case "PermissionRequest":
+            clearPending(&s, &change, note: nil)
+            guard !s.hidden else { break }
+            s.pending = pendingRequest(msg, tool: tool ?? "tool")
+            s.setSubagent(agent, tool == "AskUserQuestion" ? .asking : .needsPermission)
+            s.note = nil
+        case "PreToolUse":
+            if tool == "AskUserQuestion", s.pending?.agentId != agent { s.setSubagent(agent, .asking) }
+        case "PostToolUse", "PostToolUseFailure", "PermissionDenied":
+            if matches(s.pending, p) { clearPending(&s, &change, note: event == "PermissionDenied" ? "Denied" : "Answered in terminal") }
+            if s.pending?.agentId != agent { s.setSubagent(agent, .running) }
+        default:
+            break
+        }
+    }
+
+    /// Same tool_use_id when both sides have one; the tool name otherwise. Never across agents.
     private func matches(_ pending: PendingRequest?, _ p: JSONValue) -> Bool {
-        guard let pending else { return false }
+        guard let pending, pending.agentId == p["agent_id"]?.string else { return false }
         if let a = pending.toolUseId, let b = p["tool_use_id"]?.string { return a == b }
         return pending.toolName == p["tool_name"]?.string
     }
 
     private func newSession(_ sid: String, _ msg: HookMessage, now: Date) -> Session {
         let key = msg.env.claudePid.map { "pid-\($0)" } ?? sid
-        return Session(id: sid, mascotKey: key, cwd: msg.payload["cwd"]?.string ?? "", state: .starting,
+        return Session(id: sid, mascotKey: key, cwd: msg.payload["cwd"]?.string ?? "", mainState: .starting,
                        env: Self.routingEnv(msg.env), hidden: msg.env.attended == "0", updated: now)
     }
 
@@ -153,13 +214,14 @@ public struct SessionStore: Sendable {
         PendingRequest(id: msg.id, kind: tool == "AskUserQuestion" ? .question : .permission, toolName: tool,
                        toolUseId: msg.payload["tool_use_id"]?.string,
                        toolInput: msg.payload["tool_input"] ?? .null,
-                       suggestions: msg.payload["permission_suggestions"]?.array ?? [])
+                       suggestions: msg.payload["permission_suggestions"]?.array ?? [],
+                       agentId: msg.payload["agent_id"]?.string)
     }
 
     private func applyNotification(_ s: inout Session, type: String?) {
         switch type {
-        case "permission_prompt": if s.pending == nil { s.state = .needsPermission }
-        case "elicitation_dialog", "agent_needs_input": if s.pending == nil { s.state = .asking }
+        case "permission_prompt": if s.mainPending == nil { s.state = .needsPermission }
+        case "elicitation_dialog", "agent_needs_input": if s.mainPending == nil { s.state = .asking }
         case "idle_prompt": if s.state == .done || s.state == .starting { s.state = .idle }
         default: break
         }
@@ -180,6 +242,7 @@ public struct SessionStore: Sendable {
         change.staleRequests.append(pend.id)
         s.pending = nil
         s.note = note
+        if let a = pend.agentId { s.setSubagent(a, .running) }
         if s.state.needsAttention { s.state = .working }
     }
 
@@ -194,10 +257,10 @@ public struct SessionStore: Sendable {
 
     /// Buddy answered the request. Returns false if it is no longer pending.
     public mutating func resolve(requestId: String) -> Bool {
-        guard var s = sessions.values.first(where: { $0.pending?.id == requestId }) else { return false }
+        guard var s = sessions.values.first(where: { $0.pending?.id == requestId }), let pend = s.pending else { return false }
         s.pending = nil
         s.note = nil
-        s.state = .working
+        if let a = pend.agentId { s.setSubagent(a, .running) } else { s.state = .working }
         sessions[s.id] = s
         return true
     }
@@ -207,6 +270,7 @@ public struct SessionStore: Sendable {
     public mutating func reap(isAlive: (Int32) -> Bool, now: Date = Date()) -> (ended: [String], stale: [String]) {
         var ended: [String] = []
         var change = StoreChange()
+        for id in sessions.keys { sessions[id]?.pruneActivity(now: now) }
         for (id, s) in sessions where s.state != .ended {
             if let pid = s.env.claudePid {
                 guard !isAlive(pid) else { continue }
@@ -216,6 +280,7 @@ public struct SessionStore: Sendable {
             var copy = s
             clearPending(&copy, &change, note: nil)
             copy.state = .ended
+            copy.endActivity(now: now)
             sessions[id] = copy
             ended.append(id)
         }

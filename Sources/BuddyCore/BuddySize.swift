@@ -31,6 +31,14 @@ public enum BuddySize: String, CaseIterable, Sendable, Identifiable {
         return device == device.rounded() ? factor : factor.rounded(.up)
     }
 
+    /// A subagent mini: half the buddy, rounded up to whole device pixels, never bigger than the buddy.
+    /// Retina: 2× → 1, Tiny 1× → 0.5. A 1× screen: Tiny minis keep the buddy's scale.
+    public func miniPointsPerPixel(backingScale: Double) -> Double {
+        let b = max(backingScale, 1)
+        let full = pointsPerPixel(backingScale: b)
+        return min(full, (full / 2 * b).rounded(.up) / b)
+    }
+
     /// Name tag font: grows a little with the mascot, never below 9 pt.
     public var tagFontSize: Double { min(13, max(9, 9 + factor)) }
 

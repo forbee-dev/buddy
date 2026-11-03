@@ -31,6 +31,7 @@ final class MascotController {
     private var sliding = false
     private var bubble: BubbleController?
     private var position: (n: Int, of: Int)?
+    let minis = MiniStrip()
 
     var model: AppModel { director.model }
     private var scale: CGFloat { model.pointScale }
@@ -57,6 +58,7 @@ final class MascotController {
         panel = MascotPanel(size: .zero, canKey: false)
         layout()
         wireEvents()
+        minis.onOpen = { [weak self] id in self?.showActivity(highlight: id) }
         update(spec)
         setVisible(!director.model.buddiesHidden)
     }
@@ -98,6 +100,7 @@ final class MascotController {
 
     func setVisible(_ visible: Bool) {
         if visible { panel.orderFrontRegardless() } else { panel.orderOut(nil); bubble?.close(); bubble = nil }
+        minis.setVisible(visible)
     }
 
     private func wireEvents() {
@@ -133,6 +136,8 @@ final class MascotController {
         badge.isHidden = new.badge == 0
         badge.stringValue = "\(new.badge)"
         updateLabel()
+        minis.update(subagents: new.subagents, shells: new.shells,
+                     project: new.sessionId.flatMap { model.session($0)?.projectName } ?? new.label, look: new.look)
         sprite.setAccessibilityHelp("Press to open the bubble. Use the actions menu for more.")
         if sessionChanged, let sid = new.sessionId { bubble?.retarget(sid) }
         if new.state == .ended { leave(); return }
@@ -174,7 +179,8 @@ final class MascotController {
             walkTarget = nil
             let wasOpen = bubble != nil
             showBubble(focus: false)
-            if !wasOpen { Announcer.say("\(s.projectName): \(p.kind == .question ? "Claude has a question" : "\(p.toolName) needs permission")") }
+            let who = p.agentId.map { "\(s.subagentLabel($0)) (subagent)" } ?? "Claude"
+            if !wasOpen { Announcer.say("\(s.projectName): \(p.kind == .question ? "\(who) has a question" : "\(who) wants to run \(p.toolName)")") }
         } else if spec.state.needsAttention, !director.grouped, isCrowded(), !model.reduceMotion {
             walkTarget = director.freeX(width: spriteSize, excluding: self) - panelSize.width / 2
             director.wake()
@@ -195,6 +201,12 @@ final class MascotController {
         bubble?.show(focus: focus)
     }
 
+    /// Mini or shell chip click: the bubble opens on Activity with that row marked.
+    func showActivity(highlight: String?, focus: Bool = true) {
+        showBubble(focus: focus)
+        bubble?.showActivity(highlight: highlight)
+    }
+
     private func followBubble() {
         bubble?.follow(spriteScreenRect, placement: director.bubblePlacement(for: spriteScreenRect))
     }
@@ -210,12 +222,14 @@ final class MascotController {
         isLeaving = true
         bubble?.close()
         bubble = nil
+        minis.close()
         walkTarget = nil
         pinned = false
     }
 
     func close() {
         bubble?.close()
+        minis.close()
         panel.orderOut(nil)
         director.removed(self)
     }
@@ -231,6 +245,7 @@ extension MascotController {
         move(dt: dt, others: others)
         animate(dt: dt)
         if panel.frame.origin != NSPoint(x: x, y: y) { panel.setFrameOrigin(NSPoint(x: x, y: y)) }
+        if !isLeaving { minis.step(dt: dt, sprite: spriteScreenRect, forceLeft: director.grouped) }
         followBubble()
     }
 
@@ -352,19 +367,20 @@ extension MascotController {
             menu.popUp(positioning: nil, at: point, in: sprite)
             return
         }
-        let cwd = s.cwd
         menu.addItem(ActionItem("Open bubble") { [weak self] in self?.showBubble(focus: true) })
-        menu.addItem(ActionItem("Re-roll look") { [weak self] in self?.model.rerollLook(cwd: cwd) })
+        menu.addItem(ActionItem("Re-roll look") { [weak self] in self?.model.rerollLook(s) })
         let palettes = NSMenu()
+        let inUse = model.palettesInUse(except: s)
         for name in sheet.paletteNames {
-            palettes.addItem(ActionItem(name, checked: name == spec.look.palette) { [weak self] in self?.model.setLook(cwd: cwd, palette: name) })
+            let title = inUse.contains(name) ? "\(name) (in use)" : name
+            palettes.addItem(ActionItem(title, checked: name == spec.look.palette) { [weak self] in self?.model.setLook(s, palette: name) })
         }
         menu.addItem(submenu("Palette", palettes))
         let outfits = NSMenu()
-        outfits.addItem(ActionItem("None", checked: spec.look.outfit == nil) { [weak self] in self?.model.setLook(cwd: cwd, outfit: .some(nil)) })
+        outfits.addItem(ActionItem("None", checked: spec.look.outfit == nil) { [weak self] in self?.model.setLook(s, outfit: .some(nil)) })
         for name in sheet.outfits(fitting: spec.look.base) {
             let label = sheet.outfits[name]?.label ?? name
-            outfits.addItem(ActionItem(label, checked: name == spec.look.outfit) { [weak self] in self?.model.setLook(cwd: cwd, outfit: .some(name)) })
+            outfits.addItem(ActionItem(label, checked: name == spec.look.outfit) { [weak self] in self?.model.setLook(s, outfit: .some(name)) })
         }
         menu.addItem(submenu("Outfit", outfits))
         menu.addItem(.separator())

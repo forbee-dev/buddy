@@ -91,7 +91,9 @@ If Buddy runs from outside an Applications folder, the window first offers **Mov
 - The file is written back with sorted keys, so key order can change.
 - Only new Claude sessions use the hooks.
 
-Events: `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `Stop`, `Notification`, `PermissionRequest` (timeout 3600 s, the only one that waits), `PreToolUse` (matcher `AskUserQuestion`), `PostToolUse`, `PostToolUseFailure`, `PermissionDenied` (timeout 5 s each).
+Events: `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `Stop`, `Notification`, `PermissionRequest` (timeout 3600 s, the only one that waits), `PreToolUse` (matcher `AskUserQuestion|Agent|Task`), `PostToolUse`, `PostToolUseFailure`, `PermissionDenied`, `SubagentStart`, `SubagentStop` (timeout 5 s each).
+
+**After you update Buddy, click Install hooks again.** A new version can use new events (for example `SubagentStart` and `SubagentStop` for subagent minis). When your installed hooks lack them, the menu and Settings show "New hook events available: click Install hooks". Install adds only what is missing; your other hooks stay.
 
 The command is the single-quoted absolute path of `Buddy.app/Contents/MacOS/buddy-hook`. Buddy recognizes its entries by that quoted form and the `/Contents/MacOS/buddy-hook` suffix. If you move the app, click Install again: the old entries are replaced.
 

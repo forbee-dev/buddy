@@ -47,6 +47,8 @@ private struct GeneralTab: View {
             Toggle("Walk around when idle", isOn: $model.walking)
             if model.reduceMotion { Text("Reduce Motion is on: buddies stand still.").font(.caption).foregroundStyle(.secondary) }
             Toggle("Sleeping buddy when no sessions", isOn: $model.sleepMascot)
+            Toggle("Show subagents as minis", isOn: $model.showMinis)
+            Toggle("Show background shells", isOn: $model.showShells)
             Toggle("Start Buddy at login", isOn: Binding(get: { services.launchAtLogin }, set: { services.setLaunchAtLogin($0) }))
             Picker("Open newest card", selection: $model.hotkey) {
                 ForEach(HotkeyChoice.allCases) { Text($0.label).tag($0) }
@@ -124,6 +126,7 @@ struct HooksSection: View {
                 Button("Move to Applications") { services.moveToApplications() }
             }
             Text("Claude Code hooks: \(model.hooksInstalled ? "installed" : "not installed")").font(.headline)
+            if model.hooksOutdated { WarningText(text: "New hook events available: click Install hooks.") }
             HStack {
                 Button("Install hooks") { model.installHooks(true) }.disabled(model.hooksInstalled)
                 Button("Uninstall hooks") { model.installHooks(false) }

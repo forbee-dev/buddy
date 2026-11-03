@@ -18,7 +18,28 @@ Version 1. Source of truth for `buddy-hook`, the Buddy app, and the VS Code/Curs
 
 `buddy-hook` connects first; if Buddy is not running it exits at once, before it reads stdin. Then it checks the listener: the peer uid must be its own, and the peer process (`LOCAL_PEERPID` → `proc_pidpath`) must be the `Buddy` binary in the same folder as `buddy-hook`. On a mismatch, it sends nothing and exits 0.
 
-`payload` holds only the fields the app uses: `session_id`, `hook_event_name`, `cwd`, `permission_mode`, `source`, `reason`, `tool_name`, `tool_use_id`, `notification_type`, `last_assistant_message` (max 16,000 chars), `error` (max 4,000 chars). For `PermissionRequest` it also holds `tool_input` (whole, never trimmed) and `permission_suggestions`. `tool_response` and `prompt` are never sent.
+`payload` holds only the fields the app uses: `session_id`, `hook_event_name`, `cwd`, `permission_mode`, `source`, `reason`, `tool_name`, `tool_use_id`, `notification_type`, `transcript_path`, `last_assistant_message` (max 16,000 chars), `error` (max 4,000 chars), `agent_id` and `agent_type` (max 100 chars each; present only inside a subagent). For `PermissionRequest` it also holds `tool_input` (whole, never trimmed) and `permission_suggestions`.
+
+Other events keep only these parts of the big fields:
+
+| Field | Kept | Used for |
+|---|---|---|
+| `tool_input` | `description`, `subagent_type`, `command`, `task_id` (strings, max 200 chars each), `run_in_background` (bool) | subagent label, shell label, TaskStop |
+| `tool_response` | `agentId`, `backgroundTaskId` (strings, max 200 chars) | link a subagent to its Agent call; shell id |
+| `background_tasks` | `id`, `type`, `status` of each entry (max 50 entries) | a shell that left the list has finished |
+| `prompt` | never sent. For a `<task-notification>` prompt the hook sends only its `<task-id>` as `task_id` (ASCII letters, digits, `-`, `_`, max 64 chars) | a background task ended |
+
+Everything else in `tool_input`, `tool_response`, and `prompt` (Agent prompts, command output, subagent results) never leaves the hook.
+
+### Subagents and background shells
+
+Events: `SubagentStart` and `SubagentStop` (non-blocking), plus `PreToolUse` with the matcher `AskUserQuestion|Agent|Task`. Every event fired inside a subagent carries `agent_id`. The app routes such events to that subagent only; they never change the main session state. The one exception is attention: a subagent's `PermissionRequest` shows the normal card, and the buddy shows "needs permission" until it is answered.
+
+- Subagent: created on `SubagentStart`. Its label is the `description` of the oldest `PreToolUse` `Agent` call in the same session that has no subagent yet (FIFO). `PostToolUse` `Agent` with `tool_response.agentId` fixes a wrong pairing. Done on `SubagentStop`, failed on `PostToolUseFailure` for its `Agent` call. `last_assistant_message` of `SubagentStop` is trimmed to 300 chars.
+- Subagent permission: it has no `tool_use_id`, so a later `PostToolUse`, `PostToolUseFailure`, or `PermissionDenied` clears the card only when its `agent_id` and `tool_name` match. Answers bind to the request id, as for the main session.
+- Shell: created on `PostToolUse` `Bash` with `tool_input.run_in_background: true`; the id is `tool_response.backgroundTaskId`. Finished when a later main `Stop` has a `background_tasks` array without that id, or on a `<task-notification>` `UserPromptSubmit` whose `task_id` names it. Stopped on `PostToolUse` `TaskStop` with `tool_input.task_id`. A `Stop` without `background_tasks` changes nothing.
+- The same main `Stop` rule marks a subagent done when its id left `background_tasks` (a safety net for a lost `SubagentStop`).
+- `SessionEnd` ends all running subagents and shells. Per session the app keeps 20 subagents and 10 shells. Ended entries expire after 10 minutes; past the cap the oldest ended entries go first.
 
 ```json
 {"kind":"hook","id":"<uuid>","wantsReply":true,"payload":{...hook stdin JSON, unchanged...},"env":{"claudePid":123,"shellPid":122,"tty":"ttys004","termProgram":"vscode","bundleId":"com.todesktop.230313mzl4w4u92","askpassMain":"...","itermSessionId":null,"termSessionId":null,"messagingSocket":"/tmp/cc-socks/123.sock","messagingToken":"...","attended":"1"}}

@@ -31,10 +31,13 @@ public enum HookInstaller {
         Spec(event: "Notification", matcher: nil, timeout: 5),
         // The only blocking hook: it answers permissions and AskUserQuestion (W2 hand tests).
         Spec(event: "PermissionRequest", matcher: nil, timeout: 3600),
-        Spec(event: "PreToolUse", matcher: "AskUserQuestion", timeout: 5),
+        // Agent/Task: the call's description names the subagent that starts next.
+        Spec(event: "PreToolUse", matcher: "AskUserQuestion|Agent|Task", timeout: 5),
         Spec(event: "PostToolUse", matcher: nil, timeout: 5),
         Spec(event: "PostToolUseFailure", matcher: nil, timeout: 5),
         Spec(event: "PermissionDenied", matcher: nil, timeout: 5),
+        Spec(event: "SubagentStart", matcher: nil, timeout: 5),
+        Spec(event: "SubagentStop", matcher: nil, timeout: 5),
     ]
 
     static let hookSuffix = "/Contents/MacOS/buddy-hook"
@@ -168,9 +171,24 @@ public enum HookInstaller {
         return path
     }
 
+    public enum Status: Sendable, Equatable {
+        case missing
+        /// Buddy hooks exist but differ from what Install writes now (new events, or a moved app).
+        case outdated
+        case current
+    }
+
+    public static func status(settings: Data?, hookPath: String) -> Status {
+        guard let dict = try? parse(settings), let hooks = try? hooksObject(dict), dict["hooks"] != nil else { return .missing }
+        if (try? install(settings: settings, hookPath: hookPath)) == nil { return .current }
+        return NSDictionary(dictionary: removingOurs(hooks, hookPath: hookPath)).isEqual(to: hooks) ? .missing : .outdated
+    }
+
+    public static func status(settingsURL: URL, hookPath: String) -> Status {
+        status(settings: try? Data(contentsOf: settingsURL.resolvingSymlinksInPath()), hookPath: hookPath)
+    }
+
     public static func isInstalled(settingsURL: URL, hookPath: String) -> Bool {
-        guard let data = try? Data(contentsOf: settingsURL.resolvingSymlinksInPath()),
-              let dict = try? parse(data) else { return false }
-        return (try? install(settings: data, hookPath: hookPath)) == nil && dict["hooks"] != nil
+        status(settingsURL: settingsURL, hookPath: hookPath) == .current
     }
 }

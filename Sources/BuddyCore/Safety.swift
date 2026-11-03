@@ -35,6 +35,14 @@ public enum PermissionDisplay {
         return DisplayText.reveal(parts.joined(separator: "\n\n"))
     }
 
+    public enum Risk: Sendable { case sandboxOff, writes, readOnly }
+
+    /// Card accent. Unknown tools (MCP and others) count as `writes`: Buddy cannot tell what they do.
+    public static func risk(tool: String, input: JSONValue) -> Risk {
+        if sandboxDisabled(input) { return .sandboxOff }
+        return ["Read", "Glob", "Grep", "LS", "NotebookRead", "WebSearch", "WebFetch", "TodoWrite"].contains(tool) ? .readOnly : .writes
+    }
+
     public static func sandboxDisabled(_ input: JSONValue) -> Bool { input["dangerouslyDisableSandbox"]?.bool == true }
 
     public static func stats(_ text: String) -> (lines: Int, chars: Int) {
