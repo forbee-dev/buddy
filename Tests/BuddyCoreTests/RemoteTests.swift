@@ -291,3 +291,22 @@ import Testing
         #expect(TagLayout.resolve([tag("b", x: 100, w: 80), tag("a", x: 110, w: 80)]) == ["b": .stack])
     }
 }
+
+@Suite struct RemoteClientNameTests {
+    let token = String(repeating: "ab", count: 32)
+
+    /// A saved "ssh" path that is a link to another program does not let that program in.
+    @Test func resolvedClientMustBeNamedSSH() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("buddy-ssh-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let link = dir.appendingPathComponent("ssh").path
+        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: "/bin/sh")
+        #expect(RemoteAuth.savedClients([link]) == [link])
+        let shell = PeerCheck.resolved("/bin/sh")
+        #expect(RemoteAuth.check(peerUid: getuid(), peerPath: shell, allowedClients: RemoteAuth.defaultClients + [link], sent: token,
+                                 expected: token, remote: RemoteInfo(host: "h", user: "u")) == .notSSH)
+        #expect(RemoteAuth.check(peerUid: getuid(), peerPath: "/usr/bin/ssh", allowedClients: RemoteAuth.defaultClients + [link], sent: token,
+                                 expected: token, remote: RemoteInfo(host: "h", user: "u")) == .ok)
+    }
+}

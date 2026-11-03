@@ -17,8 +17,6 @@ cask "buddy" do
   ]
 
   caveats <<~EOS
-    Buddy is not notarized. If macOS blocks it, run:
-      xattr -dr com.apple.quarantine /Applications/Buddy.app
-    Or open System Settings > Privacy & Security and click "Open Anyway".
+    Buddy is not notarized yet. On first open, go to System Settings → Privacy & Security → Open Anyway.
   EOS
 end

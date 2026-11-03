@@ -15,7 +15,7 @@ guard let data = FileManager.default.contents(atPath: args[1]),
       let legend = json["legend"] as? [String: Any],
       let palettes = json["palettes"] as? [String: [String: String]],
       let bases = json["bases"] as? [String: Any],
-      let baseName = bases.keys.sorted().first,
+      let baseName = bases["clawd"] != nil ? "clawd" : bases.keys.sorted().first,
       let base = bases[baseName] as? [String: Any],
       let states = base["states"] as? [String: Any],
       let idle = states["idle"] as? [String: Any],
@@ -35,7 +35,9 @@ func rgb(_ hex: String?) -> (CGFloat, CGFloat, CGFloat)? {
 var pixels: [(Int, Int, (CGFloat, CGFloat, CGFloat))] = []
 for (y, row) in rows.enumerated() {
     for (x, ch) in row.enumerated() where ch != "." {
-        guard let slot = legend[String(ch)] as? String, let c = rgb(palette[slot]) else { continue }
+        guard let slot = legend[String(ch)] as? String, let c = rgb(palette[slot]) else {
+            fail("sprites.json: idle frame has an unresolved legend slot '\(ch)' at \(x),\(y)")
+        }
         pixels.append((x, y, c))
     }
 }

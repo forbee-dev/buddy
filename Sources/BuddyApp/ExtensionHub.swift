@@ -17,7 +17,8 @@ final class ExtensionHub {
         clients[ObjectIdentifier(conn)] = Client(conn: conn, editor: m.editor, version: Activity.clip(m.version, 32),
                                                    terminals: owned(m.terminals, root: root),
                                                    folders: JumpTarget.validFolders(m.workspaceFolders))
-        log.info("Extension connected: \(m.editor, privacy: .public) \(m.version, privacy: .public)")
+        // Socket text is untrusted: logged clipped.
+        log.info("Extension connected: \(Activity.clip(m.editor, 32), privacy: .public) \(Activity.clip(m.version, 32), privacy: .public)")
         onChange?()
     }
 

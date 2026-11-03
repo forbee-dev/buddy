@@ -49,7 +49,7 @@ MAX_IN = 1 << 20
 MAX_LINE = 1 << 20
 KEYS = ("session_id", "hook_event_name", "cwd", "permission_mode", "source", "reason", "tool_name", "tool_use_id",
         "notification_type", "last_assistant_message", "error", "transcript_path", "agent_id", "agent_type")
-LIMITS = {"last_assistant_message": 16000, "error": 4000, "agent_id": 100, "agent_type": 100}
+LIMITS = {"last_assistant_message": 16000, "error": 4000, "agent_id": 100, "agent_type": 100, "tool_name": 200}
 INPUT_KEYS = ("description", "subagent_type", "command", "task_id", "file_path")
 RESPONSE_KEYS = ("agentId", "backgroundTaskId", "task_type")
 INPUT_LIMIT = 200
@@ -247,12 +247,14 @@ printf '%s\n' "$TOKEN" > "$tmp"
 chmod 600 "$tmp"
 mv -f "$tmp" "$HOME/.config/buddy/token"
 
-# Same events, matchers, and timeouts as the local installer (Sources/BuddyCore/HookInstaller.swift).
-python3 - "$HOME/.claude/settings.json" "$HOOK" <<'BUDDY_PY_EOF'
+# Settings edit: settings-edit.py, embedded below. `test_hook.py --embed` refreshes it.
+python3 - install "$HOME/.claude/settings.json" "$HOOK" <<'BUDDY_PY_EOF'
 import json, os, sys, tempfile, time
 
-path, hook = sys.argv[1], sys.argv[2]
+mode, path = sys.argv[1], sys.argv[2]
+hook = sys.argv[3] if mode == "install" else None
 SUFFIX = "/.buddy/bin/buddy-hook-remote"
+# Same events, matchers, and timeouts as the local installer (Sources/BuddyCore/HookInstaller.swift).
 SPECS = [("SessionStart", None, 5), ("SessionEnd", None, 5), ("UserPromptSubmit", None, 5), ("Stop", None, 5),
          ("Notification", None, 5), ("PermissionRequest", None, 3600), ("PreToolUse", "AskUserQuestion|Agent|Task", 5),
          ("PostToolUse", None, 5), ("PostToolUseFailure", None, 5), ("PermissionDenied", None, 5),
@@ -284,6 +286,8 @@ except ValueError as e:
     sys.exit("buddy: %s is not valid JSON (%s). Nothing changed." % (path, e))
 if not isinstance(data, dict) or not isinstance(data.get("hooks", {}), dict):
     sys.exit("buddy: %s has an unexpected shape. Nothing changed." % path)
+if mode == "uninstall" and "hooks" not in data:
+    sys.exit(0)
 
 hooks = {}
 for event, groups in data.get("hooks", {}).items():
@@ -303,19 +307,22 @@ for event, groups in data.get("hooks", {}).items():
             kept.append(dict(g, hooks=left))
     if kept or not groups:
         hooks[event] = kept
-for event, matcher, timeout in SPECS:
-    if not isinstance(hooks.get(event, []), list):
-        sys.exit("buddy: %s has an unexpected value at hooks.%s. Nothing changed." % (path, event))
-    group = {"hooks": [{"type": "command", "command": quote(hook), "timeout": timeout}]}
-    if matcher:
-        group["matcher"] = matcher
-    hooks[event] = hooks.get(event, []) + [group]
+if mode == "install":
+    for event, matcher, timeout in SPECS:
+        if not isinstance(hooks.get(event, []), list):
+            sys.exit("buddy: %s has an unexpected value at hooks.%s. Nothing changed." % (path, event))
+        group = {"hooks": [{"type": "command", "command": quote(hook), "timeout": timeout}]}
+        if matcher:
+            group["matcher"] = matcher
+        hooks[event] = hooks.get(event, []) + [group]
 new = dict(data, hooks=hooks)
 if new == data:
-    print("Claude Code settings already have Buddy's hooks.")
+    if mode == "install":
+        print("Claude Code settings already have Buddy's hooks.")
     sys.exit(0)
 
 folder = os.path.dirname(real)
+backup = None
 if raw is not None:
     backup = "%s.buddy-backup-%s" % (real, time.strftime("%Y%m%d-%H%M%S"))
     n = 0
@@ -328,7 +335,8 @@ if raw is not None:
     prefix = os.path.basename(real) + ".buddy-backup-"
     for old in sorted(x for x in os.listdir(folder) if x.startswith(prefix))[:-5]:
         os.remove(os.path.join(folder, old))
-    print("Backup: " + backup)
+    if mode == "install":
+        print("Backup: " + backup)
 # A new file with a random name (O_EXCL, 0600) in the same folder, so the replace is atomic.
 fd, tmp = tempfile.mkstemp(dir=folder, prefix=".settings.buddy-")
 try:
@@ -340,7 +348,10 @@ try:
 except BaseException:
     os.unlink(tmp)
     raise
-print("Claude Code settings updated: " + path)
+if mode == "install":
+    print("Claude Code settings updated: " + path)
+else:
+    print("Removed Buddy's hooks from %s. Backup: %s" % (path, backup))
 BUDDY_PY_EOF
 
 SOCK="$HOME/.buddy/buddy.sock"

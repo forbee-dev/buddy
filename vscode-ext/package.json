@@ -2,7 +2,7 @@
   "name": "buddy-companion",
   "displayName": "Buddy Companion",
   "description": "Lets the Buddy macOS app type into and focus integrated terminals.",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "tiagosantos-local",
   "license": "MIT",
   "repository": {

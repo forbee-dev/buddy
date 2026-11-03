@@ -7,13 +7,21 @@ It does not track cloud or VM sessions, or plain Claude chats.
 
 Needs macOS 14 or later and Claude Code 2.1.224 or later. Tested on Claude Code 2.1.317 and Claude Desktop 4.4212.0 (Claude Code 2.1.309).
 
+## Homebrew
+
+```sh
+brew trust forbee-dev/tap
+brew install --cask forbee-dev/tap/buddy
+```
+
+Homebrew loads no third-party tap until you trust it. Buddy is not notarized yet. On first open, go to System Settings → Privacy & Security → **Open Anyway**.
+
 ## Team install (from the DMG)
 
 1. Download `Buddy-<version>.dmg`. Open it and drag **Buddy** to **Applications**.
 2. Open Buddy from Applications. The app is not notarized, so macOS blocks it the first time.
    - Go to **System Settings → Privacy & Security**. Scroll down. Click **Open Anyway** next to the Buddy message.
    - On recent macOS, right-click → Open no longer skips this check.
-   - Alternative in Terminal: `xattr -dr com.apple.quarantine /Applications/Buddy.app`
 3. In the welcome window, grant the permissions (see below).
 4. Click **Install hooks**.
 5. If you use VS Code or Cursor, click **Install in VS Code** or **Install in Cursor**. Then reload the editor window.
@@ -32,7 +40,7 @@ open build/Buddy.app
 
 - The script runs `swift build -c release` and assembles `build/Buddy.app`.
 - `Contents/MacOS`: `Buddy` and `buddy-hook`.
-- `Contents/Resources`: `sprites.json` (from `design/`), `prices.json`, `skins/crate.json`, the `remote/` scripts, `AppIcon.icns`, and the newest `vscode-ext/buddy-companion-*.vsix` if there is one.
+- `Contents/Resources`: `sprites.json` (from `design/`), `prices.json`, `skins/` (the bundled skins), `sounds/*.wav`, the `remote/` scripts, `AppIcon.icns`, and the newest `vscode-ext/buddy-companion-*.vsix` if there is one.
 - `scripts/make-icon.swift` makes `Resources/AppIcon.icns` from the sprites when `design/sprites.json` changes.
 
 ### Local dev install
@@ -120,6 +128,21 @@ The companion extension lets Buddy type your next prompt into the right editor t
 - To turn the actions off: Settings → Notifications → **Allow answering from notifications**.
 - ⌃⌥B opens the newest waiting card. ⌃⌥Space opens the command palette: a list of sessions, waiting ones first. Change both in Settings → General. If you give one the other's key, the two swap.
 
+## Sounds
+
+Settings → Sounds:
+
+- **Play sounds** (on by default) and a **Sound set**: Buddy chiptune (short 8-bit sounds made for Buddy, the default), macOS sounds (pick one per event), or None.
+- A switch and a ▶︎ preview per event: permission needed, question asked, tool failed, session done, still waiting reminder, subagent done (off by default), and while you were away.
+- **Volume** (60% by default).
+- When **Play sounds** is off, the set, volume, and "Only when…" controls are greyed out.
+- **Only when the session's app is not in front** (on): no sound while the session's terminal, editor, or Claude Desktop is the front app.
+- **Also when notifications are off** (on): permission, question, and done sounds play even when their notification is off.
+- **Notification banner sound** (off): the macOS alert sound, only for events Buddy plays no sound for. You hear one sound, never two.
+- At most one sound plays every 1.5 s. Inside that time, only a more important event plays, at its end: permission, then question, error, done, the others.
+- Sounds add to the buddy, the card, and VoiceOver. They never replace them.
+- The chiptune files are `Resources/sounds/*.wav`. `node design/sounds/gen-sounds.js` makes them and checks their headers.
+
 ## Fun, impatience, and away
 
 Settings → General:
@@ -130,7 +153,7 @@ Settings → General:
 
 ## Tokens and cost
 
-Buddy adds up the tokens in each session's transcript and its subagent transcripts. It reads only new bytes, at most every 5 s while the session works, and once when it stops. It shows "42.1k tok · $0.31" in the Activity tab, the menu, and the command palette. Turn it off in Settings → General → **Show tokens and cost**.
+Buddy adds up the tokens in each session's transcript and its subagent transcripts. It reads only new bytes, at most every 5 s while the session works, and once when it stops. It shows "42.1k tok · $0.31" in the Activity tab, the menu, and the command palette. It also shows in every bubble header and the buddy tooltip. Turn it off in Settings → General → **Show tokens and cost**. Settings → General → **Show cost on the buddy's name tag** (off by default) adds "project · $0.31" to the tag, or "42k" when a model has no price.
 
 The prices are in `~/Library/Application Support/Buddy/prices.json` (USD per million tokens, per model id). Buddy copies its placeholder table there on first start. **Edit prices…** opens it; restart Buddy after a change. A model that is not in the table shows tokens only. Check the prices for your plan at anthropic.com/pricing.
 

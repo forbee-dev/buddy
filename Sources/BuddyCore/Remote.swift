@@ -51,12 +51,14 @@ public enum RemoteAuth {
         paths.filter { $0.hasPrefix("/") && ($0 as NSString).lastPathComponent == "ssh" }
     }
 
-    /// `peerPath` is already resolved (`PeerCheck.path(of:)`); `allowedClients` are resolved here.
+    /// `peerPath` is already resolved (`PeerCheck.path(of:)`); `allowedClients` are resolved here, and a client counts only
+    /// when its resolved binary is still named `ssh` (a saved path that now links to another program does not).
     public static func check(peerUid: uid_t?, peerPath: String?, allowedClients: [String], sent: String?, expected: String?,
                              remote: RemoteInfo?, uid: uid_t = getuid(),
                              equals: (String, String) -> Bool = constantTimeEquals) -> Verdict {
         guard let peerUid, peerUid == uid else { return .otherUser }
-        guard let peerPath, allowedClients.map(PeerCheck.resolved).contains(peerPath) else { return .notSSH }
+        guard let peerPath, allowedClients.map(PeerCheck.resolved).contains(where: { $0 == peerPath && ($0 as NSString).lastPathComponent == "ssh" })
+        else { return .notSSH }
         guard let expected, !expected.isEmpty else { return .notConfigured }
         guard let sent, !sent.isEmpty else { return .noToken }
         guard equals(sent, expected) else { return .badToken }

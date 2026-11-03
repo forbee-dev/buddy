@@ -4,7 +4,8 @@ import Foundation
 /// the user must see all of it, and AskUserQuestion answers copy it back. Other events keep a few short
 /// `tool_input` keys, two `tool_response` ids, and the ids of `background_tasks`. The prompt never leaves the hook.
 public enum HookPayload {
-    static let limits: [String: Int] = ["last_assistant_message": 16_000, "error": 4_000, "agent_id": 100, "agent_type": 100]
+    static let limits: [String: Int] = ["last_assistant_message": 16_000, "error": 4_000, "agent_id": 100, "agent_type": 100,
+                                         "tool_name": 200]
     static let inputLimit = 200
     static let maxTasks = 50
 

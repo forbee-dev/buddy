@@ -6,7 +6,6 @@ struct BubbleView: View {
     let selection: BubbleSelection
     let single: Bool
     let close: () -> Void
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -15,7 +14,7 @@ struct BubbleView: View {
                 header(s)
                 if s.hasActivity { tabs(s) }
                 if activeTab(s) == .activity {
-                    ActivityList(session: s, draft: selection, usage: model.usageText(s.id))
+                    ActivityList(session: s, draft: selection, usage: model.usageText(s.id), spokenUsage: model.usageText(s.id, spoken: true))
                 } else {
                     SessionCard(model: model, session: s, draft: selection)
                     if let note = s.note {
@@ -29,9 +28,7 @@ struct BubbleView: View {
         }
         .padding(14)
         .frame(width: wide ? 640 : 380)
-        .background(RoundedRectangle(cornerRadius: 14).fill(reduceTransparency ? AnyShapeStyle(.background) : AnyShapeStyle(.regularMaterial)))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(border.color, lineWidth: border.width))
-        .padding(2)
+        .calloutBackground(border: border.color, lineWidth: border.width)
     }
 
     private var pending: PendingRequest? { selection.sessionId.flatMap { model.session($0)?.pending } }
@@ -63,9 +60,20 @@ struct BubbleView: View {
     private func header(_ s: Session?) -> some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(s?.projectName ?? "Buddy").font(.headline).accessibilityAddTraits(.isHeader)
-                if let s { Text(subtitle(s)).font(.callout).foregroundStyle(.secondary) }
+                Text(s?.projectName ?? "Buddy").font(.headline)
+                if let s {
+                    HStack(spacing: 4) {
+                        Text(subtitle(s)).font(.callout)
+                        if let u = model.usageText(s.id) {
+                            Text("· \(u)").font(.caption.monospacedDigit()).accessibilityLabel(model.usageText(s.id, spoken: true) ?? u)
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+                }
             }
+            // One header for VoiceOver: project, state, then tokens and cost.
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
             Spacer()
             if let p = s?.pending, p.kind == .question, selection.requestId == p.id, selection.flow.count > 1 {
                 Text(selection.flow.progress).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
@@ -73,14 +81,7 @@ struct BubbleView: View {
                     .background(Capsule().fill(Color.primary.opacity(0.07)))
                     .accessibilityLabel("Question \(selection.flow.progress)")
             }
-            Button(action: close) {
-                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                    .frame(minWidth: 24, minHeight: 24).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .keyboardShortcut(.cancelAction)
-            .accessibilityLabel("Close bubble")
-            .help("Close (Esc)")
+            CloseButton(label: "Close bubble", action: close)
         }
     }
 
@@ -138,8 +139,9 @@ enum BubbleTab: Hashable { case card, activity }
 struct ActivityList: View {
     let session: Session
     @Bindable var draft: BubbleSelection
-    /// "42.1k tok · $0.31" for the whole session, subagents included.
+    /// "42.1k tok · $0.31" for the whole session, subagents included, and its VoiceOver form.
     var usage: String?
+    var spokenUsage: String?
 
     private struct Row: Identifiable {
         let id: String
@@ -164,7 +166,7 @@ struct ActivityList: View {
         if let usage {
             Label(usage, systemImage: "gauge.with.dots.needle.33percent")
                 .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                .accessibilityLabel("Session usage: \(usage)")
+                .accessibilityLabel("Session usage: \(spokenUsage ?? usage)")
         }
         FitScroll(key: "activity", maxHeight: min(360, FitScroll<EmptyView>.screenCap), draft: draft) {
             // One clock for the list; it ticks only while the bubble is on screen.
@@ -183,7 +185,7 @@ struct ActivityList: View {
         VStack(alignment: .leading, spacing: 4) {
             line(id: a.id, color: a.state.sessionState.color, label: Text(a.label),
                  kind: a.background ? "\(a.type) · background" : a.type, state: a.state.label, start: a.startedAt, end: a.endedAt, now: now,
-                 a11y: "subagent \(a.label), \(a.type), \(a.state.label)")
+                 a11y: "subagent \(a.label), \(a.type), \(a.state.label)", selected: draft.highlight == a.id)
             if let m = a.lastMessage, !a.state.isActive {
                 DisclosureGroup("Show result", isExpanded: Binding(get: { draft.shownResults.contains(a.id) }, set: { on in
                     if on { draft.shownResults.insert(a.id) } else { draft.shownResults.remove(a.id) }
@@ -198,6 +200,7 @@ struct ActivityList: View {
         }
         .padding(6)
         .background(RoundedRectangle(cornerRadius: 6).fill(draft.highlight == a.id ? Color.accentColor.opacity(0.18) : .clear))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(draft.highlight == a.id ? Color.accentColor : .clear))
     }
 
     private func shellRow(_ s: Shell, now: Date) -> some View {
@@ -211,7 +214,7 @@ struct ActivityList: View {
     }
 
     private func line(id: String, color: Color, label: Text, kind: String, state: String, start: Date, end: Date?, now: Date,
-                      a11y: String) -> some View {
+                      a11y: String, selected: Bool = false) -> some View {
         let took = Self.duration((end ?? now).timeIntervalSince(start))
         return VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 6) {
@@ -224,6 +227,7 @@ struct ActivityList: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(a11y), \(end == nil ? "running for" : "took") \(took)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     static func duration(_ t: TimeInterval) -> String {

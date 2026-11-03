@@ -41,7 +41,7 @@ public struct UsageMeter: Sendable {
     private static let decoder = JSONDecoder()
     public init() {}
 
-    public var tokens: Int { byModel.values.reduce(0) { TokenCounts.add($0, $1.total) } }
+    public var tokens: Int { UsageFormat.total(byModel) }
 
     /// Reads the new bytes of every file. False when the main transcript cannot be read.
     public mutating func update(transcript: String, home: String = NSHomeDirectory(), uid: uid_t = getuid()) -> Bool {
@@ -176,18 +176,60 @@ extension PriceTable.Price {
 }
 
 public enum UsageFormat {
+    /// Every model's tokens; stops at Int.max.
+    public static func total(_ byModel: [String: TokenCounts]) -> Int { byModel.values.reduce(0) { TokenCounts.add($0, $1.total) } }
+
+    /// Per-model sums of several sessions.
+    public static func sum(_ list: [[String: TokenCounts]]) -> [String: TokenCounts] {
+        list.reduce(into: [:]) { acc, u in
+            for (m, t) in u { acc[m] = TokenCounts(zip(acc[m, default: TokenCounts()].fields, t.fields).map(TokenCounts.add)) }
+        }
+    }
+
     /// "950 tok", "42.1k tok", "3.2M tok".
     public static func tokens(_ n: Int) -> String {
         if n < 1000 { return "\(n) tok" }
         let k = (Double(n) / 100).rounded() / 10
         if k < 1000 { return String(format: "%.1fk tok", k) }
-        return String(format: "%.1fM tok", (Double(n) / 100_000).rounded() / 10)
+        return String(format: "%.1fM tok", millions(n))
     }
+
+    /// For the name tag: "$0.31", or "43k" when the price table misses a model. Rounds like `tokens`.
+    public static func short(_ byModel: [String: TokenCounts], prices: PriceTable?) -> String {
+        if let cost = prices?.cost(byModel) { return String(format: "$%.2f", cost) }
+        let n = total(byModel)
+        if n < 1000 { return "\(n)" }
+        let k = (Double(n) / 1000).rounded()
+        if k < 1000 { return "\(Int(k))k" }
+        return String(format: "%.1fM", millions(n))
+    }
+
+    private static func millions(_ n: Int) -> Double { (Double(n) / 100_000).rounded() / 10 }
 
     /// "42.1k tok · $0.31", or tokens only when the price table misses a model.
     public static func line(_ byModel: [String: TokenCounts], prices: PriceTable?) -> String {
-        let t = tokens(byModel.values.reduce(0) { TokenCounts.add($0, $1.total) })
+        let t = tokens(total(byModel))
         guard let cost = prices?.cost(byModel) else { return t }
         return t + String(format: " · $%.2f", cost)
     }
+
+    /// The name tag's usage: only with "cost on the tag" on and some tokens counted. `byModel` is nil when usage is off or remote.
+    public static func tag(_ byModel: [String: TokenCounts]?, prices: PriceTable?, costOnTag: Bool) -> String? {
+        guard costOnTag, let u = byModel, total(u) > 0 else { return nil }
+        return short(u, prices: prices)
+    }
+
+    /// `line` for VoiceOver: "42.1 thousand tokens, 31 cents".
+    public static func spoken(_ byModel: [String: TokenCounts], prices: PriceTable?) -> String {
+        let n = total(byModel)
+        let k = (Double(n) / 100).rounded() / 10
+        let t = n < 1000 ? "\(n) \(n == 1 ? "token" : "tokens")"
+            : k < 1000 ? "\(number(k)) thousand tokens" : "\(number(millions(n))) million tokens"
+        guard let cost = prices?.cost(byModel) else { return t }
+        let cents = Int((cost * 100).rounded())
+        return t + ", " + (cents < 100 ? "\(cents) \(cents == 1 ? "cent" : "cents")" : String(format: "%.2f dollars", cost))
+    }
+
+    /// "42.1", or "43" for a whole number.
+    private static func number(_ v: Double) -> String { v == v.rounded() ? "\(Int(v))" : String(format: "%.1f", v) }
 }

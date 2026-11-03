@@ -8,9 +8,12 @@ signal(SIGPIPE, SIG_IGN)
 #if DEBUG
 let debugBuild = true
 let appNames = HookTrust.debugNames
+/// Tests set `BUDDY_HOOK_WAIT_MS` to tell "the app closed" from "the cap ran out". At least 1: 0 means no timeout.
+let closeWaitMs = ProcessInfo.processInfo.environment["BUDDY_HOOK_WAIT_MS"].flatMap(Int.init).map { min(max($0, 1), 60_000) } ?? 1000
 #else
 let debugBuild = false
 let appNames = HookTrust.releaseNames
+let closeWaitMs = 1000
 #endif
 
 func gatherEnv() -> HookEnv {
@@ -54,7 +57,7 @@ func run() throws {
     guard wantsReply else {
         // Stay alive until the app has checked this process and closes; 1 s cap.
         shutdown(fd, SHUT_WR)
-        UnixSocket.setReceiveTimeout(fd, seconds: 1)
+        UnixSocket.setReceiveTimeout(fd, milliseconds: closeWaitMs)
         UnixSocket.drainUntilClose(fd)
         return
     }

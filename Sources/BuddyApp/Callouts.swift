@@ -70,7 +70,7 @@ final class Callout {
 
     func place(above sprite: NSRect) {
         let size = panel.frame.size
-        let screen = (NSScreen.screens.first { $0.frame.intersects(sprite) } ?? NSScreen.main)?.visibleFrame ?? .zero
+        let screen = NSScreen.visibleFrame(holding: sprite)
         let x = min(max(sprite.midX - size.width / 2, screen.minX + 4), screen.maxX - size.width - 4)
         let y = min(sprite.maxY + 2, screen.maxY - size.height)
         let o = NSPoint(x: x.rounded(), y: y.rounded())
@@ -99,21 +99,13 @@ struct DigestView: View {
     let lines: [DigestLine]
     let model: AppModel
     let close: () -> Void
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("While you were away").font(.headline).accessibilityAddTraits(.isHeader)
                 Spacer()
-                Button(action: close) {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                        .frame(minWidth: 24, minHeight: 24).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .keyboardShortcut(.cancelAction)
-                .accessibilityLabel("Close")
-                .help("Close (Esc)")
+                CloseButton(action: close)
             }
             ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                 Button {
@@ -135,9 +127,7 @@ struct DigestView: View {
         }
         .padding(12)
         .frame(width: 320)
-        .background(RoundedRectangle(cornerRadius: 14).fill(reduceTransparency ? AnyShapeStyle(.background) : AnyShapeStyle(.regularMaterial)))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.separator))
-        .padding(2)
+        .calloutBackground()
     }
 
     private func color(_ k: DigestLine.Kind) -> Color {
@@ -147,5 +137,51 @@ struct DigestView: View {
         case .subagentsFailed: .red
         case .shellsFinished: .blue
         }
+    }
+}
+
+/// The round close button of the bubble and the callouts. Esc presses it while its panel is key.
+struct CloseButton: View {
+    var label = "Close"
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                .frame(minWidth: 24, minHeight: 24).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(.cancelAction)
+        .accessibilityLabel(label)
+        .help("Close (Esc)")
+    }
+}
+
+/// Material panel (solid with Reduce Transparency) with a rounded border: the bubble, palette, digest, and Bee callout.
+struct CalloutBackground: ViewModifier {
+    var radius: CGFloat = 14
+    var border = AnyShapeStyle(.separator)
+    var lineWidth: CGFloat = 1
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        content
+            .background(RoundedRectangle(cornerRadius: radius).fill(reduceTransparency ? AnyShapeStyle(.background) : AnyShapeStyle(.regularMaterial)))
+            .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(border, lineWidth: lineWidth))
+            .padding(2)
+    }
+}
+
+extension View {
+    func calloutBackground(radius: CGFloat = 14, border: AnyShapeStyle = AnyShapeStyle(.separator), lineWidth: CGFloat = 1) -> some View {
+        modifier(CalloutBackground(radius: radius, border: border, lineWidth: lineWidth))
+    }
+}
+
+extension NSScreen {
+    /// The visible frame of the screen that meets `rect`; the main screen when none does or no rect is given.
+    static func visibleFrame(holding rect: NSRect? = nil) -> NSRect {
+        let screen = rect.flatMap { r in screens.first { $0.frame.intersects(r) } } ?? main ?? screens.first
+        return screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
     }
 }

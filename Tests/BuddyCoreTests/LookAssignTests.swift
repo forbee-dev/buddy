@@ -82,3 +82,35 @@ import Testing
         }
     }
 }
+
+@Suite struct LookRefreshTests {
+    static let sheet: SpriteSheet = {
+        let json = ##"""
+        {"version":1,"grid":{"w":1,"h":1},"fps":8,"legend":{"K":"outline"},"palettes":{"p0":{"outline":"#000000"},"p1":{"outline":"#111111"}},
+         "bases":{"clawd":{"states":{"idle":{"loop":true,"frames":[{"rows":["K"]}]}}},
+                  "crate/crate":{"states":{"idle":{"loop":true,"frames":[{"rows":["K"]}]}}}},
+         "outfits":{"hat":{"rows":["."]},"box":{"fits":["crate/crate"],"rows":["."]}}}
+        """##
+        return try! SpriteSheet.load(Data(json.utf8))
+    }()
+
+    let looks = ["a": Look(base: "clawd", palette: "p0", outfit: "hat"), "b": Look(base: "crate/crate", palette: "p1", outfit: "box"),
+                 "c": Look(base: "bee/bee", palette: "p0", outfit: nil), "d": Look(base: "clawd", palette: "gone", outfit: nil)]
+
+    /// One character: every buddy switches to it; an outfit that does not fit it comes off.
+    @Test func singleCharacterReplaces() {
+        let r = LookRefresh.refresh(looks, sheet: Self.sheet, bases: ["clawd"], mix: false)
+        #expect(r == ["a": Look(base: "clawd", palette: "p0", outfit: "hat"), "b": Look(base: "clawd", palette: "p1", outfit: nil),
+                      "c": Look(base: "clawd", palette: "p0", outfit: nil)])
+    }
+
+    /// Mix: a buddy whose character is gone loses its look (it gets a new one); the others keep theirs.
+    @Test func mixKeepsValidLooks() {
+        let r = LookRefresh.refresh(looks, sheet: Self.sheet, bases: ["clawd", "crate/crate"], mix: true)
+        #expect(r == looks.filter { $0.key == "a" || $0.key == "b" })
+    }
+
+    @Test func noCharacterDropsAll() {
+        #expect(LookRefresh.refresh(looks, sheet: Self.sheet, bases: [], mix: false).isEmpty)
+    }
+}

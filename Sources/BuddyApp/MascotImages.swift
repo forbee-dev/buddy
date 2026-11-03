@@ -17,12 +17,7 @@ enum MascotImages {
     static func cgImage(_ sheet: SpriteSheet, look: Look, state: String = "idle") -> (CGImage, RenderedFrame)? {
         guard let frame = sheet.anim(base: look.base, chain: [state])?.frames.first else { return nil }
         let r = SpriteRenderer.render(sheet: sheet, frame: frame, look: look, mirrored: false)
-        guard let provider = CGDataProvider(data: Data(r.rgba) as CFData),
-              let space = CGColorSpace(name: CGColorSpace.sRGB),
-              let img = CGImage(width: r.width, height: r.height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: r.width * 4,
-                                space: space, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                                provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent) else { return nil }
-        return (img, r)
+        return SpriteImages.makeImage(r).map { ($0, r) }
     }
 
     /// Idle frame 0 at 0.5 pt per sprite pixel (16 pt; 1 device pixel each on Retina).

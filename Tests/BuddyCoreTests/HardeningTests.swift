@@ -3,6 +3,38 @@ import Darwin
 import Testing
 @testable import BuddyCore
 
+@Suite struct HardeningTests {
+    @Test func installerOnlyMatchesQuotedForm() { // Low: isOurs
+        let path = "/A/Buddy.app/Contents/MacOS/buddy-hook"
+        #expect(HookInstaller.isOurs(HookInstaller.command(for: path), hookPath: path))
+        #expect(!HookInstaller.isOurs(path, hookPath: path))
+        #expect(!HookInstaller.isOurs(path + " --evil", hookPath: path))
+    }
+
+    @Test func inboxFolderMustNotBeWritableByOthers() throws { // Low
+        let dir = PeerCheck.resolved(NSTemporaryDirectory()) + "/bgw-\(UUID().uuidString.prefix(6))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let sock = dir + "/a.sock"
+        let fd = try UnixSocket.listen(sock)
+        defer { close(fd) }
+        chmod(dir, 0o777)
+        #expect(throws: SocketError.self) { try InboxClient.checkSocketFile(sock) }
+        chmod(dir, 0o1777)
+        try InboxClient.checkSocketFile(sock)
+        chmod(dir, 0o700)
+        try InboxClient.checkSocketFile(sock)
+    }
+
+    @Test func descendsUsesAncestors() {
+        #expect(ProcInfo.descends(getpid(), from: getpid()))
+        #expect(ProcInfo.descends(getpid(), from: getppid()))
+        #expect(!ProcInfo.descends(getppid(), from: getpid()))
+        #expect(ProcInfo.info(of: getpid())?.ppid == getppid())
+        #expect(ProcInfo.info(of: 999_999) == nil)
+    }
+}
+
 @Suite struct ProjectNameTests {
     @Test func projectNamesAreRevealedAndClipped() {
         var store = SessionStore()
@@ -41,16 +73,6 @@ import Testing
     }
 }
 
-@Suite struct TextFieldKeyTests {
-    /// Review L1: ⌘⌫ in the palette search (or any text field) edits text, never denies the open card.
-    @Test func commandDeleteStaysInATextField() {
-        #expect(TextFieldKeys.keepInField(keyCode: TextFieldKeys.delete, command: true, textFocused: true))
-        #expect(!TextFieldKeys.keepInField(keyCode: TextFieldKeys.delete, command: true, textFocused: false))
-        #expect(!TextFieldKeys.keepInField(keyCode: TextFieldKeys.delete, command: false, textFocused: true))
-        #expect(!TextFieldKeys.keepInField(keyCode: 36, command: true, textFocused: true))
-    }
-}
-
 @Suite struct SafeFileTests {
     @Test func symlinkedFolderResolvesButSymlinkedFileIsRefused() throws {
         let fm = FileManager.default
@@ -65,5 +87,27 @@ import Testing
         #expect(SafeFile.contents(root + "/real/f.json", maxBytes: 10, uid: getuid() + 1) == nil)
         #expect(SafeFile.contents(root + "/real/f.json", maxBytes: 10, uid: nil) != nil)
         #expect(SafeFile.contents(root + "/real/..", maxBytes: 10) == nil)
+    }
+}
+
+@Suite struct HookTrustTests {
+    let hook = "/Applications/Buddy.app/Contents/MacOS/buddy-hook"
+    let app = "/Applications/Buddy.app/Contents/MacOS/Buddy"
+
+    @Test func onlyOurUserAndTheAppNextToTheHook() {
+        let uid: uid_t = 501
+        #expect(HookTrust.serverAllowed(peerUid: uid, ownUid: uid, peerPath: app, selfPath: hook, names: HookTrust.releaseNames))
+        #expect(!HookTrust.serverAllowed(peerUid: 502, ownUid: uid, peerPath: app, selfPath: hook, names: HookTrust.releaseNames))
+        #expect(!HookTrust.serverAllowed(peerUid: nil, ownUid: uid, peerPath: app, selfPath: hook, names: HookTrust.releaseNames))
+        #expect(!HookTrust.serverAllowed(peerUid: uid, ownUid: uid, peerPath: "/tmp/Buddy.app/Contents/MacOS/Buddy", selfPath: hook,
+                                         names: HookTrust.releaseNames))
+        #expect(!HookTrust.serverAllowed(peerUid: uid, ownUid: uid, peerPath: nil, selfPath: hook, names: HookTrust.releaseNames))
+        #expect(!HookTrust.serverAllowed(peerUid: uid, ownUid: uid, peerPath: app, selfPath: nil, names: HookTrust.releaseNames))
+    }
+
+    @Test func releaseNamesRejectTheDebugBinary() {
+        let debug = "/Applications/Buddy.app/Contents/MacOS/BuddyApp"
+        #expect(!HookTrust.serverAllowed(peerUid: 501, ownUid: 501, peerPath: debug, selfPath: hook, names: HookTrust.releaseNames))
+        #expect(HookTrust.serverAllowed(peerUid: 501, ownUid: 501, peerPath: debug, selfPath: hook, names: HookTrust.debugNames))
     }
 }

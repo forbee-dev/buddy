@@ -207,7 +207,7 @@ final class BubbleController {
         let moved = anchor != .zero && sprite.origin != anchor.origin
         anchor = sprite
         lastSize = panel.frame.size
-        let screen = NSScreen.screens.first { $0.frame.intersects(sprite) }?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+        let screen = NSScreen.visibleFrame(holding: sprite)
         let size = panel.frame.size
         var x = sprite.midX - size.width / 2
         var y = sprite.maxY + 4

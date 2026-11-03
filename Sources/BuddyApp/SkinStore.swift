@@ -37,7 +37,7 @@ final class SkinStore {
         switched = UserDefaults.standard.dictionary(forKey: PrefKey.skinsEnabled) as? [String: Bool] ?? [:]
     }
 
-    func isOn(_ e: Entry) -> Bool { e.skin.map { switched[$0.name] ?? !e.bundled } ?? false }
+    func isOn(_ e: Entry) -> Bool { e.skin.map { switched[$0.name] ?? BeeEgg.onByDefault(skin: $0.name, bundled: e.bundled) } ?? false }
 
     /// Applies the switched-on skins in list order (bundled first), skipping one that reuses an earlier one's char or color key.
     private func apply() {
@@ -91,10 +91,11 @@ final class SkinStore {
         let userFolder: String? = folder
         #endif
         let bundled = Self.bundledFolder
+        let beeUnlocked = model?.beeUnlocked ?? false
         generation += 1
         let gen = generation
         loading = Task {
-            let loaded = await Task.detached(priority: .utility) { Self.load(base: base, bundled: bundled, user: userFolder) }.value
+            let loaded = await Task.detached(priority: .utility) { Self.load(base: base, bundled: bundled, user: userFolder, beeUnlocked: beeUnlocked) }.value
             guard gen == generation else { return }
             let same = loaded.map { [$0.id, "\($0.hash)", $0.error ?? ""] } == entries.map { [$0.id, "\($0.hash)", $0.error ?? ""] }
             guard !same else { return }
@@ -103,7 +104,7 @@ final class SkinStore {
         }
     }
 
-    private nonisolated static func load(base: SpriteSheet, bundled: (dir: String, inApp: Bool)?, user: String?) -> [Entry] {
+    private nonisolated static func load(base: SpriteSheet, bundled: (dir: String, inApp: Bool)?, user: String?, beeUnlocked: Bool) -> [Entry] {
         var names = Set<String>()
         func load(_ path: String, bundled: Bool, checkOwner: Bool) -> Entry {
             let file = (path as NSString).lastPathComponent
@@ -121,7 +122,9 @@ final class SkinStore {
             return e
         }
         // Files inside the signed app bundle are code-signed resources (often owned by root): no owner check.
-        let b = bundled.map { dir in jsonFiles(in: dir.dir).map { load($0, bundled: true, checkOwner: !dir.inApp) } } ?? []
+        let b = bundled.map { dir in
+            BeeEgg.bundledFiles(jsonFiles(in: dir.dir), unlocked: beeUnlocked).map { load($0, bundled: true, checkOwner: !dir.inApp) }
+        } ?? []
         return b + (user.map { jsonFiles(in: $0).map { load($0, bundled: false, checkOwner: true) } } ?? [])
     }
 

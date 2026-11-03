@@ -20,10 +20,10 @@ struct HookBinaryTests {
         "/tmp/buddy-t-\(UUID().uuidString.prefix(8)).sock"
     }
 
-    func run(stdin: String, socket: String) throws -> (Process, Pipe) {
+    func run(stdin: String, socket: String, env: [String: String] = [:]) throws -> (Process, Pipe) {
         let p = Process()
         p.executableURL = Self.binary
-        p.environment = ["BUDDY_SOCKET": socket, "CLAUDE_PID": "\(getpid())", "HOME": "/nonexistent"]
+        p.environment = ["BUDDY_SOCKET": socket, "CLAUDE_PID": "\(getpid())", "HOME": "/nonexistent"].merging(env) { $1 }
         let input = Pipe(), output = Pipe()
         p.standardInput = input
         p.standardOutput = output
@@ -116,7 +116,8 @@ struct HookBinaryTests {
         let path = Self.tempSocketPath()
         let server = try UnixSocket.listen(path)
         defer { close(server); unlink(path) }
-        let (p, _) = try run(stdin: #"{"session_id":"s","hook_event_name":"Stop"}"#, socket: path)
+        // A 10 s cap (DEBUG builds only): an exit within 3 s can only come from the close.
+        let (p, _) = try run(stdin: #"{"session_id":"s","hook_event_name":"Stop"}"#, socket: path, env: ["BUDDY_HOOK_WAIT_MS": "10000"])
         let conn = try acceptWithin3s(server)
         let line = try UnixSocket.readLine(conn)
         #expect(line != nil)
@@ -124,8 +125,7 @@ struct HookBinaryTests {
         close(conn)
         let start = Date()
         p.waitUntilExit()
-        // Under its own 1 s cap: it left because the app closed, not because it gave up.
-        #expect(Date().timeIntervalSince(start) < 0.9)
+        #expect(Date().timeIntervalSince(start) < 3)
         #expect(p.terminationStatus == 0)
     }
 }

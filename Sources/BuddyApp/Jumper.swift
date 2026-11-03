@@ -98,16 +98,13 @@ enum Jumper {
         return nil
     }
 
-    /// Only [a-z0-9] reaches the script, so a tty name cannot inject AppleScript.
-    static func safeTTY(_ tty: String) -> String { "/dev/" + tty.filter { $0.isASCII && ($0.isLetter || $0.isNumber) } }
-
     static func itermScript(tty: String) -> String {
         """
         tell application id "com.googlecode.iterm2"
           repeat with w in windows
             repeat with t in tabs of w
               repeat with s in sessions of t
-                if tty of s is "\(safeTTY(tty))" then
+                if tty of s is "\(JumpTarget.safeTTY(tty))" then
                   select w
                   select t
                   select s
@@ -126,7 +123,7 @@ enum Jumper {
         tell application id "com.apple.Terminal"
           repeat with w in windows
             repeat with t in tabs of w
-              if tty of t is "\(safeTTY(tty))" then
+              if tty of t is "\(JumpTarget.safeTTY(tty))" then
                 set selected of t to true
                 set index of w to 1
                 activate

@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 public enum HookInstallerError: Error, Equatable, CustomStringConvertible {
     case invalidJSON(String)
@@ -153,7 +154,9 @@ public enum HookInstaller {
         return .written(backup: backup)
     }
 
-    /// Backup with mode 0600; keeps only the newest `backupsKept`.
+    private static let log = Logger(subsystem: "com.tiagosantos.buddy", category: "installer")
+
+    /// Backup with mode 0600; keeps only the newest `backupsKept`. A failed prune never blocks the install.
     static func writeBackup(_ data: Data, settingsPath: String, now: Date) throws -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -166,9 +169,9 @@ public enum HookInstaller {
         try handle.close()
         let dir = (settingsPath as NSString).deletingLastPathComponent
         let prefix = (settingsPath as NSString).lastPathComponent + ".buddy-backup-"
-        let all = try FileManager.default.contentsOfDirectory(atPath: dir).filter { $0.hasPrefix(prefix) }.sorted()
-        for old in all.dropLast(backupsKept) {
-            try FileManager.default.removeItem(atPath: dir + "/" + old)
+        let all = (try? FileManager.default.contentsOfDirectory(atPath: dir).filter { $0.hasPrefix(prefix) }.sorted()) ?? []
+        for old in all.dropLast(backupsKept) where (try? FileManager.default.removeItem(atPath: dir + "/" + old)) == nil {
+            log.error("Old settings backup not removed: \(old, privacy: .public)")
         }
         return path
     }
@@ -178,11 +181,21 @@ public enum HookInstaller {
         /// Buddy hooks exist but differ from what Install writes now (new events, or a moved app).
         case outdated
         case current
+        /// settings.json is not JSON or has a shape Install refuses to change; Install would fail.
+        case invalid
     }
 
     public static func status(settings: Data?, hookPath: String) -> Status {
-        guard let dict = try? parse(settings), let hooks = try? hooksObject(dict), dict["hooks"] != nil else { return .missing }
-        if (try? install(settings: settings, hookPath: hookPath)) == nil { return .current }
+        let dict: [String: Any], hooks: [String: Any], new: Data?
+        do {
+            dict = try parse(settings)
+            hooks = try hooksObject(dict)
+            new = try install(settings: settings, hookPath: hookPath)
+        } catch {
+            return .invalid
+        }
+        guard dict["hooks"] != nil else { return .missing }
+        if new == nil { return .current }
         return NSDictionary(dictionary: removingOurs(hooks, hookPath: hookPath)).isEqual(to: hooks) ? .missing : .outdated
     }
 

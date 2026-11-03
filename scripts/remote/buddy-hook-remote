@@ -18,7 +18,7 @@ MAX_IN = 1 << 20
 MAX_LINE = 1 << 20
 KEYS = ("session_id", "hook_event_name", "cwd", "permission_mode", "source", "reason", "tool_name", "tool_use_id",
         "notification_type", "last_assistant_message", "error", "transcript_path", "agent_id", "agent_type")
-LIMITS = {"last_assistant_message": 16000, "error": 4000, "agent_id": 100, "agent_type": 100}
+LIMITS = {"last_assistant_message": 16000, "error": 4000, "agent_id": 100, "agent_type": 100, "tool_name": 200}
 INPUT_KEYS = ("description", "subagent_type", "command", "task_id", "file_path")
 RESPONSE_KEYS = ("agentId", "backgroundTaskId", "task_type")
 INPUT_LIMIT = 200

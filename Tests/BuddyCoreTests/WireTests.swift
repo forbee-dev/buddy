@@ -40,3 +40,28 @@ import Testing
         #expect(try ok.append(Data("c\n".utf8)) == [Data("bc".utf8)])
     }
 }
+
+@Suite struct WireLimitTests {
+    @Test func lineOfExactlyTheLimitPasses() throws {
+        var buf = LineBuffer()
+        let line = Data(repeating: 0x41, count: wireMaxLine)
+        #expect(try buf.append(line + Data([0x0A])) == [line])
+    }
+
+    @Test func longLineOverChunksFailsBeforeItsNewline() throws {
+        var buf = LineBuffer()
+        let half = Data(repeating: 0x41, count: wireMaxLine / 2)
+        #expect(try buf.append(half).isEmpty)
+        #expect(try buf.append(half).isEmpty)
+        #expect(throws: WireError.lineTooLong) { try buf.append(Data([0x41])) }
+    }
+
+    @Test func emptyLinesAreSkipped() throws {
+        var buf = LineBuffer()
+        #expect(try buf.append(Data("\n\na\n\nb\n".utf8)) == [Data("a".utf8), Data("b".utf8)])
+    }
+
+    @Test func decodeOverTheLimitFails() {
+        #expect(throws: WireError.lineTooLong) { try WireMessage.decode(Data(repeating: 0x20, count: wireMaxLine + 1)) }
+    }
+}

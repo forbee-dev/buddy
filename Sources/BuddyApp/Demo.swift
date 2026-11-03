@@ -9,7 +9,8 @@ import BuddyCore
 /// `--demo-wave2`: impatience level 2, a high-five pair (repeats), a tip, tokens and cost on the Activity tab.
 /// `--demo-away`: the "while you were away" digest. `--demo-mix`: Character → Mix with Crate, and a skin outfit.
 /// `--demo-ssh` (or `=diagnostics`): one SSH session (`devbox:api`), two local buddies dragged close (tag overlap fix),
-/// and Settings → SSH (or Diagnostics). `--demo-idle`: no sessions, only the sleeping buddy (idle CPU check).
+/// and Settings → SSH (or Diagnostics). `--demo-idle`: no sessions, only the sleeping buddy (idle CPU check);
+/// `--demo-idle=3`: three idle sessions instead.
 @MainActor
 enum Demo {
     static let activity = CommandLine.arguments.contains("--demo-activity")
@@ -31,7 +32,16 @@ enum Demo {
             NSApp.appearance = NSAppearance(named: arg.hasSuffix("dark") ? .darkAqua : .aqua)
         }
         model.walking = false  // a moving card stays disarmed; the debug build has its own defaults domain
-        if arg("--demo-idle") != nil { model.sleepMascot = true; return }
+        if let a = arg("--demo-idle") {
+            model.sleepMascot = true
+            for i in 0..<(Int(a.dropFirst("--demo-idle=".count)) ?? 0) {
+                let sid = "idle-\(i)"
+                model.applyDemo(HookMessage(id: sid, wantsReply: false,
+                                            payload: .object(["session_id": .string(sid), "hook_event_name": "SessionStart", "cwd": .string("/Users/demo/\(sid)")]),
+                                            env: HookEnv(termProgram: "iTerm.app", attended: "1")))
+            }
+            return
+        }
         if activity { startActivity(model: model); return }
         if arg("--demo-wave2") != nil { startWave2(model: model); return }
         if arg("--demo-away") != nil { startAway(model: model); return }

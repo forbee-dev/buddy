@@ -29,8 +29,10 @@ enum PrefKey {
     static let size = "size", buddiesHidden = "buddiesHidden", arrangement = "arrangement"
     static let showMinis = "minis.show", showShells = "minis.shells"
     static let escalateMinutes = "escalate.minutes", awayMinutes = "away.minutes", funExtras = "fun.extras"
+    static let costOnTag = "usage.tag"
     static let showUsage = "usage.show", skinsEnabled = "skins.enabled", character = "character"
     static let sshEnabled = "ssh.enabled", sshClients = "ssh.clients"
+    static let beeUnlocked = "beeUnlocked", beeHidden = "bee.hidden", forgeBeeMinis = "bee.forgeBeeMinis"
     static func anchor(_ a: Arrangement) -> String { "groupAnchor.\(a.rawValue)" }
 }
 

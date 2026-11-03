@@ -203,3 +203,13 @@ import Testing
         #expect(UnixSocket.defaultPath(env: env, allowOverride: false) == "/Users/u/Library/Application Support/Buddy/buddy.sock")
     }
 }
+
+@Suite struct PayloadLimitTests {
+    /// The tool name is model-chosen text: clipped at 200 characters like the hook does.
+    @Test func toolNameIsClipped() throws {
+        let long = String(repeating: "x", count: 5000)
+        let p = try HookPayload.decode(Data(#"{"session_id":"s","hook_event_name":"PostToolUse","tool_name":"\#(long)"}"#.utf8))
+        #expect(p["tool_name"]?.string == String(repeating: "x", count: 200) + "…")
+        #expect(HookPayload.limits["tool_name"] == 200)
+    }
+}

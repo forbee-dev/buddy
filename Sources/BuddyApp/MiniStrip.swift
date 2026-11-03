@@ -17,7 +17,11 @@ final class MiniStrip {
         let view = SpriteView(frame: .zero)
         let image = CALayer()
         var agent: Subagent
-        var animKey = ""
+        /// The character it draws, resolved when the agent, the parent look, or a setting changes (`update`).
+        var base = ""
+        /// The base and state name of the frames on screen.
+        var drawnBase = ""
+        var drawnAnim = ""
         var elapsed = 0.0
         var frameIndex = -1
         var a11y = ""
@@ -94,7 +98,7 @@ final class MiniStrip {
         let ids = shown.map(\.id)
         let extra = list.count - shown.count
         let key = ids + ["+\(extra)", ">\(shells)", "\(AppModel.shared.miniScale)"]
-        for m in minis { label(m) }
+        for m in minis { label(m); resolveBase(m) }
         guard key != shownIds else { return }
         shownIds = key
         let old = minis
@@ -112,6 +116,7 @@ final class MiniStrip {
             m.view.frame = NSRect(x: x, y: 0, width: hit, height: hit)
             m.image.frame = NSRect(x: (hit - side) / 2, y: 0, width: side, height: side)
             label(m)
+            resolveBase(m)
             x += hit + Self.gap
         }
         x = place(more, text: extra > 0 ? "+\(extra)" : nil, at: x,
@@ -136,6 +141,10 @@ final class MiniStrip {
         return x + w + Self.gap
     }
 
+    private func resolveBase(_ m: Mini) {
+        if let parent = look { m.base = AppModel.shared.miniBase(m.agent, parent: parent.base) }
+    }
+
     private func label(_ m: Mini) {
         let text = "subagent \(m.agent.label) of \(project): \(m.agent.state.label)"
         guard text != m.a11y else { return }
@@ -156,7 +165,7 @@ final class MiniStrip {
         guard !all.isEmpty || shells > 0 || width > 0 else { return }
         if let e = nextExpiry, Date() >= e { refresh(now: Date()) }
         guard width > 0 else { return }
-        let screen = (NSScreen.screens.first { $0.frame.intersects(sprite) } ?? NSScreen.main)?.visibleFrame ?? .zero
+        let screen = NSScreen.visibleFrame(holding: sprite)
         onLeft = forceLeft || sprite.midX - screen.minX >= screen.maxX - sprite.midX
         let x = onLeft ? sprite.minX - width - Self.gap : sprite.maxX + Self.gap
         let origin = NSPoint(x: x.rounded(), y: sprite.minY)
@@ -167,11 +176,12 @@ final class MiniStrip {
     private func animate(_ dt: Double) {
         let model = AppModel.shared
         guard let sheet = model.sheet, let parent = look else { return }
-        let look = Look(base: parent.base, palette: parent.palette, outfit: nil)
         for m in minis {
+            let look = Look(base: m.base, palette: parent.palette, outfit: nil)
             let names = Self.chain(m.agent.state)
             guard let anim = sheet.anim(base: look.base, chain: names) else { continue }
-            if names[0] != m.animKey { m.animKey = names[0]; m.elapsed = 0; m.frameIndex = -1 }
+            // A mini that turns into a bee (or back) draws again at once.
+            if m.base != m.drawnBase || names[0] != m.drawnAnim { m.drawnBase = m.base; m.drawnAnim = names[0]; m.elapsed = 0; m.frameIndex = -1 }
             m.elapsed += max(0, dt)
             let clock = AnimClock.frameIndex(elapsed: m.elapsed, fps: sheet.fps, count: anim.frames.count, loop: anim.loop)
             let index = model.reduceMotion && anim.loop ? 0 : clock.index

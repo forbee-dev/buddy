@@ -1,9 +1,5 @@
 // Generates sprites.json and sprites.js. Run: node gen-sprites.js [--ascii state frame outfit]
-const fs = require('fs'), path = require('path');
-const N = 32;
-const mk = () => Array.from({ length: N }, () => Array(N).fill('.'));
-const put = (g, x, y, c) => { if (x >= 0 && x < N && y >= 0 && y < N) g[y][x] = c; };
-const rect = (g, x0, y0, x1, y1, c) => { for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) put(g, x, y, c); };
+const { mk, put, rect, shape, outline, asciiFrame, writeData } = require('./pixel');
 // sym: write left-half string from x0, mirror to the right half
 const sym = (g, y, x0, s) => [...s].forEach((c, i) => { if (c !== '.') { put(g, x0 + i, y, c); put(g, 31 - x0 - i, y, c); } });
 const stamp = (g, x0, y0, rows) => rows.forEach((r, j) => [...r].forEach((c, i) => { if (c !== '.') put(g, x0 + i, y0 + j, c); }));
@@ -66,7 +62,6 @@ function face(g, bot, dx, top, p, mask) {
 }
 
 // ---- props (fixed colours) ----
-const shape = (x0, y0, rows, c) => rows.flatMap((r, j) => [...r].flatMap((ch, i) => ch === '.' ? [] : [[x0 + i, y0 + j, c || ch]]));
 const ZS = (x, y) => shape(x, y, ['XXXX', '...X', '..X.', '.X..', 'XXXX'], 'U');
 const ZB = (x, y) => shape(x, y, ['XXXXXX', '....X.', '...X..', '..X...', '.X....', 'XXXXXX'], 'V');
 // later pixels win, so the glyph overwrites the bubble fill
@@ -118,10 +113,7 @@ function frame(p) {
     for (let y = bot + r0; y <= bot + r1; y++) for (let x = x0; x <= x1; x++) put(g, side === 'L' ? x + dx : 31 - x + dx, y, 'B');
   });
   arm('L', p.armL || 'down'); arm('R', p.armR || 'down');
-  const snap = g.map(r => r.slice());
-  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-    if (snap[y][x] === '.' && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([a, b]) => (snap[y + b]?.[x + a] ?? '.') !== '.')) put(g, x, y, 'K');
-  }
+  outline(g);
   const mask = [];
   face(g, bot, dx, top, p, mask);
   const fg = mk();
@@ -322,14 +314,11 @@ const data = { version: 1, grid: { w: 32, h: 32 }, fps: 8, legend, palettes, bas
 
 if (process.argv[2] === '--ascii') {
   const [, , , st, fi, of] = process.argv;
-  const fr = bases.clawd.states[st].frames[+fi];
+  if (of && !outfits[of]) { console.error(`unknown outfit "${of}". Valid: ${Object.keys(outfits).join(', ')}`); process.exit(1); }
+  const fr = asciiFrame(bases.clawd.states, st, fi);
   const g = fr.rows.map(r => [...r]);
   if (of) outfits[of].rows.forEach((r, y) => [...r].forEach((c, x) => { if (c !== '.') put(g, x + fr.head[0], y + fr.head[1], c); }));
   console.log(g.map((r, i) => String(i).padStart(2) + ' ' + r.join('')).join('\n'));
 } else {
-  const dir = __dirname;
-  const json = JSON.stringify(data, null, 1);
-  fs.writeFileSync(path.join(dir, 'sprites.json'), json + '\n');
-  fs.writeFileSync(path.join(dir, 'sprites.js'), 'window.SPRITES = ' + json + ';\n');
-  console.log('wrote', json.length, 'bytes');
+  console.log('wrote', writeData(__dirname, 'sprites', 'SPRITES', data, true).length, 'bytes');
 }

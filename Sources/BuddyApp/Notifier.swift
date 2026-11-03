@@ -47,8 +47,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// The body names the tool and the project only, never the command (lock screen privacy).
     /// `stillWaiting`: minutes, for the one reminder of an impatient buddy. Focus and Do Not Disturb are left to macOS.
-    func post(for s: Session, model: AppModel, stillWaiting: Int? = nil) {
-        guard !s.hidden else { return }
+    /// True when a notification was posted.
+    @discardableResult
+    func post(for s: Session, model: AppModel, stillWaiting: Int? = nil) -> Bool {
+        guard !s.hidden else { return false }
         // The subagent label is model-written: marked, revealed, and clipped.
         let note = s.pending?.agentId.map { " " + NotificationActions.subagentNote(s.subagentLabel($0)) } ?? ""
         let tool = DisplayText.reveal(s.pending?.toolName ?? "A tool")
@@ -67,7 +69,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             id = "buddy-done-\(s.id)"
             if model.route(for: s) != .none { category = Self.doneCategory }
         default:
-            return
+            return false
         }
         let content = UNMutableNotificationContent()
         content.title = s.projectName
@@ -76,10 +78,15 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         if let p = s.pending, s.state != .done { info["request"] = p.id; posted[s.id] = p.id }
         content.userInfo = info
         if model.notifyActions, let category { content.categoryIdentifier = category }
+        // One sound source: Buddy's own, or (only with Buddy's off) the banner's.
+        let event = stillWaiting == nil ? SoundRules.event(for: s.state) : .reminder
+        let buddyPlays = event.map { Sounds.shared.plays($0, model: model) } ?? false
+        content.sound = SoundRules.notificationHasSound(buddyPlays: buddyPlays, bannerSound: Sounds.shared.bannerSound) ? .default : nil
         if id == Self.requestId(s.id) { alerted.insert(s.id) }
         // A permission alert shows up 700 ms after the request, like an armed card.
         let trigger = category == Self.permissionCategory ? UNTimeIntervalNotificationTrigger(timeInterval: NotificationActions.armDelay, repeats: false) : nil
         add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+        return true
     }
 
     /// A one-line follow-up, e.g. "Already answered".

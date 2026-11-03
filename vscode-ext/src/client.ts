@@ -11,6 +11,7 @@ export interface ClientOptions {
   onState?: (connected: boolean) => void;
   minDelayMs?: number;
   maxDelayMs?: number;
+  logThrottleMs?: number;
 }
 
 export class BuddyClient {
@@ -20,7 +21,7 @@ export class BuddyClient {
   private stopped = false;
   private helloSent = false;
   private queue: object[] = [];
-  private lastQuietLog = 0;
+  private readonly lastQuietLog = new Map<string, number>();
   private readonly min: number;
   private readonly max: number;
 
@@ -53,10 +54,10 @@ export class BuddyClient {
     this.sock?.write(JSON.stringify(obj) + "\n");
   }
 
-  private quietLog(msg: string): void {
+  private quietLog(key: string, msg: string): void {
     const now = Date.now();
-    if (now - this.lastQuietLog >= 60000) {
-      this.lastQuietLog = now;
+    if (now - (this.lastQuietLog.get(key) ?? -Infinity) >= (this.o.logThrottleMs ?? 60000)) {
+      this.lastQuietLog.set(key, now);
       this.o.log(msg);
     }
   }
@@ -65,7 +66,7 @@ export class BuddyClient {
     if (this.stopped) return;
     const bad = this.o.precheck?.();
     if (bad) {
-      this.quietLog(`socket untrusted, not connecting: ${bad}`);
+      this.quietLog("untrusted", `socket untrusted, not connecting: ${bad}`);
       this.schedule();
       return;
     }
@@ -74,6 +75,7 @@ export class BuddyClient {
     this.helloSent = false;
     this.queue = []; // hello carries the full terminal list
     const framer = new LineFramer();
+    let chain: Promise<void> = Promise.resolve(); // replies must keep request order
     let opened = false;
     let closed = false;
 
@@ -92,20 +94,23 @@ export class BuddyClient {
           this.queue = [];
           q.forEach((x) => this.write(x));
         },
-        (e) => this.o.log(`hello failed: ${String(e)}`),
+        (e) => {
+          this.o.log(`hello failed: ${String(e)}`);
+          sock.destroy();
+        },
       );
     });
     sock.on("data", (chunk) => {
       const lines = framer.push(chunk, () => this.o.log("oversize line dropped"));
       for (const l of lines) {
-        Promise.resolve()
+        chain = chain
           .then(() => this.o.onLine(l.toString("utf8")))
           .then((reply) => reply && this.send(reply))
           .catch((e) => this.o.log(`handler error: ${String(e)}`));
       }
     });
     sock.on("error", (e) => {
-      if (!opened) this.quietLog(`Buddy not reachable (${(e as NodeJS.ErrnoException).code ?? e})`);
+      if (!opened) this.quietLog("unreachable", `Buddy not reachable (${(e as NodeJS.ErrnoException).code ?? e})`);
       else this.o.log(`socket error: ${String(e)}`);
     });
     sock.on("close", () => {

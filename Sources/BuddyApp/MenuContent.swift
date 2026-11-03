@@ -86,7 +86,7 @@ struct BuddyRow: View {
                 .contentShape(Rectangle())
             }
             .accessibilityLabel("\(session.projectName), \(session.state.label), \(session.terminal.displayName)\(activity)"
-                                + (model.usageText(session.id).map { ", \($0)" } ?? ""))
+                                + (model.usageText(session.id, spoken: true).map { ", \($0)" } ?? ""))
             .accessibilityHint("Opens this buddy's bubble")
             Menu {
                 Button("Jump to session") { model.jump(session.id) }

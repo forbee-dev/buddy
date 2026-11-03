@@ -26,7 +26,8 @@ final class MascotController {
     private var renderedMirror = false
     private var animElapsed = 0.0
     private var finishedKey: String?
-    private var wanderIn = Double.random(in: 3...8)
+    /// The next idle walk: one delayed task, so a buddy that stands still needs no tick.
+    private var wanderTask: Task<Void, Never>?
     private var current: RenderedFrame?
     private var sliding = false
     private var bubble: BubbleController?
@@ -48,8 +49,10 @@ final class MascotController {
     /// Width the tag's text needs, and the cut or stack the director asks for when tags still overlap.
     private var tagNatural: CGFloat = 0
     private var tagFit: TagLayout.Fit?
-    /// The sleep loop runs as a layer animation and the director's timer is off.
+    /// The looping animation runs as a layer animation and the director's timer is off.
     private(set) var isParked = false
+    /// What the parked layer animation shows; a change parks again.
+    private var parkedAs: (anim: String, look: Look)?
     static let nudgeEvery = 20.0
 
     var model: AppModel { director.model }
@@ -73,10 +76,17 @@ final class MascotController {
         return NSRect(x: x + (panelSize.width - side) / 2, y: y + lift + tagHeight + 4, width: side, height: side)
     }
     var hasBubble: Bool { bubble != nil }
-    /// Asleep, still, and alone: nothing for the tick to do.
+    /// Still, alone, and its animation loops (or has ended): nothing for the tick to do. An impatient buddy's timer
+    /// and hops need the tick, so a wait with escalation on is never idle.
     var isIdle: Bool {
-        spec.sleeping && !isMoving && !isLeaving && tip == nil && digest == nil && bubble == nil && five == nil && minis.width == 0
+        guard !isMoving, !isLeaving, tip == nil, digest == nil, bubble == nil, five == nil, minis.width == 0,
+              spec.waitingSince == nil || model.escalateAfter == nil else { return false }
+        let names = chain()
+        return finishedKey == names[0] || model.sheet?.anim(base: spec.look.base, chain: names)?.loop != false
     }
+
+    /// Parked with a layer animation that no longer matches the state or look.
+    var needsPark: Bool { !isParked || parkedAs?.anim != chain()[0] || parkedAs?.look != spec.look }
 
     init(spec: MascotSpec, director: MascotDirector, startX: CGFloat) {
         self.key = spec.key
@@ -180,7 +190,7 @@ final class MascotController {
         sprite.onDrop = { [weak self] in
             guard let self else { return }
             dragging = false
-            if director.grouped { director.endGroupDrag() } else { pinned = true }
+            if director.grouped { director.endGroupDrag() } else { pinned = true; updateActions() }
         }
         sprite.onMenu = { [weak self] p in self?.showMenu(at: p) }
     }
@@ -196,9 +206,7 @@ final class MascotController {
         minis.update(subagents: new.subagents, shells: new.shells,
                      project: new.sessionId.flatMap { model.session($0)?.projectName } ?? new.label, look: new.look)
         sprite.setAccessibilityHelp("Press to open the bubble. Use the actions menu for more.")
-        var actions = [NSAccessibilityCustomAction(name: "Jump to terminal") { [weak self] in self?.jumpNow(); return true }]
-        if pinned, !director.grouped { actions.append(NSAccessibilityCustomAction(name: "Unpin") { [weak self] in self?.unpin(); return true }) }
-        sprite.setAccessibilityCustomActions(spec.sleeping ? [] : actions)
+        updateActions()
         if sessionChanged, let sid = new.sessionId { bubble?.retarget(sid) }
         if new.state == .ended { leave(); return }
         guard stateChanged else { return }
@@ -206,16 +214,26 @@ final class MascotController {
         cardChanged()
     }
 
+    private func updateActions() {
+        var actions = [NSAccessibilityCustomAction(name: "Jump to terminal") { [weak self] in self?.jumpNow(); return true }]
+        if pinned, !director.grouped { actions.append(NSAccessibilityCustomAction(name: "Unpin") { [weak self] in self?.unpin(); return true }) }
+        sprite.setAccessibilityCustomActions(spec.sleeping ? [] : actions)
+    }
+
     private func updateLabel() {
         let count = spec.badge > 0 ? ", \(spec.badge) waiting" : ""
         let place = position.map { ", position \($0.n) of \($0.of)" } ?? ""
         let wait = waitText.isEmpty ? "" : ", \(waitText)"
-        sprite.setAccessibilityLabel("Buddy for \(spec.label), \(spec.sleeping ? "sleeping" : spec.state.label)\(wait)\(count)\(place)")
+        let state = spec.sleeping ? "sleeping" : spec.state.label
+        let usage = spec.spokenUsage.map { ", \($0)" } ?? ""
+        sprite.setAccessibilityLabel("Buddy for \(spec.label), \(state)\(wait)\(count)\(usage)\(place)")
+        sprite.toolTip = ([spec.label, state] + [spec.usage].compactMap { $0 }).joined(separator: " · ")
     }
 
     /// "waiting 6m · api" while impatient: the timer stays readable when a long name truncates.
     private func showTag() {
-        tag.stringValue = waitText.isEmpty ? spec.label : "\(waitText) · \(spec.label)"
+        let name = spec.tagUsage.map { "\(spec.label) · \($0)" } ?? spec.label
+        tag.stringValue = waitText.isEmpty ? name : "\(waitText) · \(name)"
         layoutTag()
     }
 
@@ -254,6 +272,7 @@ final class MascotController {
     func leaveGroup() {
         if y > director.floor.minY + 1 { pinned = true }
         setPosition(nil, of: 0)
+        updateActions()
     }
 
     func setY(_ v: CGFloat) { y = v }
@@ -291,6 +310,7 @@ final class MascotController {
         }
         followBubble()
         bubble?.show(focus: focus)
+        if let sid = spec.sessionId { model.usageForBubble(sid) }
     }
 
     /// Mini or shell chip click: the bubble opens on Activity with that row marked.
@@ -323,7 +343,7 @@ final class MascotController {
         model.jump(sid)
     }
 
-    private func unpin() { pinned = false; y = director.floor.minY }
+    private func unpin() { pinned = false; y = director.floor.minY; updateActions(); director.motionChanged() }
 
     // MARK: Fun extras and the away digest
 
@@ -418,6 +438,7 @@ final class MascotController {
     func leave() {
         guard !isLeaving else { return }
         isLeaving = true
+        wanderTask?.cancel()
         bubble?.close()
         bubble = nil
         minis.close()
@@ -426,6 +447,7 @@ final class MascotController {
     }
 
     func close() {
+        wanderTask?.cancel()
         bubble?.close()
         minis.close()
         panel.orderOut(nil)
@@ -461,7 +483,7 @@ extension MascotController {
             let f = director.floor
             walkTarget = centerX < f.midX ? f.minX - panelSize.width - 10 : f.maxX + 10
         }
-        guard let target = walkTarget else { wander(dt); return }
+        guard let target = walkTarget else { scheduleWander(); return }
         if model.reduceMotion { arrive(at: target); return }
         let dir: CGFloat = target < x ? -1 : 1
         facingLeft = dir < 0
@@ -496,12 +518,25 @@ extension MascotController {
         if isLeaving && goodbyeDone { close() }
     }
 
-    private func wander(_ dt: Double) {
-        guard !pinned, !isLeaving, model.walking, !model.reduceMotion, !spec.sleeping, digest == nil else { return }
-        guard spec.state == .idle || spec.state == .starting || (spec.state == .done && finishedKey == "done") else { return }
-        wanderIn -= dt
-        guard wanderIn <= 0 else { return }
-        wanderIn = Double.random(in: 4...12)
+    private var canWander: Bool {
+        guard !pinned, !isLeaving, !dragging, slot == nil, model.walking, !model.reduceMotion, !spec.sleeping, digest == nil else { return false }
+        return spec.state == .idle || spec.state == .starting || (spec.state == .done && finishedKey == "done")
+    }
+
+    /// Runs from the tick and from `park`; at most one walk waits at a time.
+    func scheduleWander() {
+        guard wanderTask == nil, canWander else { return }
+        wanderTask = Task { [weak self] in
+            guard (try? await Task.sleep(for: .seconds(Double.random(in: 4...12)))) != nil, let self else { return }
+            wanderTask = nil
+            wander()
+            if walkTarget == nil { scheduleWander() }
+            director.wake()
+        }
+    }
+
+    private func wander() {
+        guard canWander, walkTarget == nil else { return }
         let f = director.floor
         let span = (f.width - panelSize.width) / 4
         let target = min(max(f.minX, x + CGFloat.random(in: -span...span)), f.maxX - panelSize.width)
@@ -585,13 +620,17 @@ extension MascotController {
         return true
     }
 
-    /// Plays the sleep loop in the render server, so no timer runs. Reduce Motion keeps the still frame the tick drew.
+    /// Plays the looping animation (sleep, idle, working, …) in the render server, so no timer runs. Reduce Motion and
+    /// an ended animation keep the still frame the tick drew.
     func park() {
         isParked = true
-        guard !model.reduceMotion, let sheet = model.sheet, let anim = sheet.anim(base: spec.look.base, chain: ["sleep"]),
+        let names = chain()
+        parkedAs = (names[0], spec.look)
+        scheduleWander()
+        guard !model.reduceMotion, let sheet = model.sheet, let anim = sheet.anim(base: spec.look.base, chain: names),
               anim.loop, anim.frames.count > 1 else { return }
         let images = anim.frames.indices.compactMap {
-            director.images.frame(sheet, frame: anim.frames[$0], key: "sleep#\($0)", look: spec.look, mirrored: false)?.0
+            director.images.frame(sheet, frame: anim.frames[$0], key: "\(names[0])#\($0)", look: spec.look, mirrored: false)?.0
         }
         guard images.count == anim.frames.count else { return }
         let a = CAKeyframeAnimation(keyPath: "contents")
@@ -601,13 +640,14 @@ extension MascotController {
         a.duration = Double(images.count) / sheet.fps
         a.repeatCount = .infinity
         a.isRemovedOnCompletion = false
-        sprite.layer?.add(a, forKey: "sleep")
+        sprite.layer?.add(a, forKey: "parked")
     }
 
     func unpark() {
         guard isParked else { return }
         isParked = false
-        sprite.layer?.removeAnimation(forKey: "sleep")
+        parkedAs = nil
+        sprite.layer?.removeAnimation(forKey: "parked")
         frameIndex = -1
     }
 
@@ -679,6 +719,8 @@ extension MascotController {
         x = left ? f.minX : f.maxX - panelSize.width
         walkTarget = nil
         pinned = true
+        updateActions()
+        director.motionChanged()
     }
 
     private func submenu(_ title: String, _ sub: NSMenu) -> NSMenuItem {

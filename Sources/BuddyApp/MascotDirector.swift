@@ -1,7 +1,7 @@
 import AppKit
 import BuddyCore
 
-struct MascotSpec {
+struct MascotSpec: Equatable {
     var key: String
     var sessionId: String?
     var state: SessionState
@@ -12,11 +12,15 @@ struct MascotSpec {
     var subagents: [Subagent] = []
     var shells = 0
     var waitingSince: Date?
+    /// "42.1k tok · $0.31" for the tooltip and VoiceOver; `tagUsage` is the short form on the tag (opt-in).
+    var usage: String?
+    var spokenUsage: String?
+    var tagUsage: String?
 }
 
 /// Reconciles mascots with sessions and runs the shared animation loop.
 /// The timer exists only while mascots exist: 8 Hz (sprite fps) at rest, 30 Hz while something moves, and none at all
-/// while every buddy sleeps alone (the sleep loop then plays in the render server).
+/// while every buddy stands still alone (its loop then plays in the render server; idle walks start from a delayed task).
 @MainActor
 final class MascotDirector {
     unowned let model: AppModel
@@ -39,6 +43,10 @@ final class MascotDirector {
     private var partied = false
     /// Mouse monitors for click-through while the timer is off; none otherwise.
     private var mouseMonitors: [Any] = []
+    /// The found Bee's flight; the timer runs while it is set.
+    private var flight: BeeFlight?
+    private var beeCallout: Callout?
+    private var beeCalloutTimer: Task<Void, Never>?
 
     init(model: AppModel) {
         self.model = model
@@ -49,7 +57,11 @@ final class MascotDirector {
         ]
         for (name, pause) in pausing {
             observers.append(nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.paused = pause; self?.wake() }
+                MainActor.assumeIsolated {
+                    if pause { self?.endFlight() }
+                    self?.paused = pause
+                    self?.wake()
+                }
             })
         }
     }
@@ -66,22 +78,27 @@ final class MascotDirector {
             guard let look = model.projectLook(cwd: top.lookKey) else { return [] }
             let badge = visible.filter { $0.state.needsAttention || $0.state == .done }.count
             let label = visible.count == 1 ? top.projectName : "\(visible.count) sessions"
-            return [withActivity(MascotSpec(key: "single", sessionId: top.id, state: top.state, look: look, label: label, badge: badge, sleeping: false), top)]
+            // The tag and tooltip count every visible session, not only the one shown.
+            return [withActivity(MascotSpec(key: "single", sessionId: top.id, state: top.state, look: look, label: label, badge: badge, sleeping: false),
+                                 top, usageOf: visible.map(\.id))]
         }
         return visible.compactMap { s in
             model.look(for: s).map {
                 withActivity(MascotSpec(key: s.mascotKey, sessionId: s.id, state: s.state, look: $0,
                                         label: s.terminal == .claudeDesktop ? "\(s.projectName) · Claude Desktop" : s.projectName,
-                                        badge: s.state == .done ? 1 : 0, sleeping: false), s)
+                                        badge: s.state == .done ? 1 : 0, sleeping: false), s, usageOf: [s.id])
             }
         }
     }
 
-    private func withActivity(_ spec: MascotSpec, _ s: Session) -> MascotSpec {
+    private func withActivity(_ spec: MascotSpec, _ s: Session, usageOf sids: [String]) -> MascotSpec {
         var spec = spec
         if model.showMinis { spec.subagents = Array(s.subagents.values) }
         if model.showShells { spec.shells = s.runningShells }
         spec.waitingSince = s.waitingSince
+        spec.usage = model.usageText(sids)
+        spec.spokenUsage = model.usageText(sids, spoken: true)
+        spec.tagUsage = model.tagUsage(sids)
         return spec
     }
 
@@ -99,7 +116,8 @@ final class MascotDirector {
         }
     }
 
-    func sync() {
+    /// `force`: update every buddy even when its spec did not change (sizes, skins, or settings the spec does not hold).
+    func sync(force: Bool = false) {
         let specs = specs()
         let keys = Set(specs.map(\.key))
         for spec in specs where seen[spec.key] == nil { seen[spec.key] = seenCount; seenCount += 1 }
@@ -110,7 +128,7 @@ final class MascotDirector {
         for spec in specs {
             if let c = controllers[spec.key], !c.isLeaving {
                 if spec.state == .done && c.spec.state != .done { finished.append(c) }
-                c.update(spec)
+                if force || spec != c.spec { c.update(spec) }
             }
             else {
                 controllers[spec.key]?.close()
@@ -125,7 +143,10 @@ final class MascotDirector {
         relayoutGroup()
         for c in fresh { if let slot = slot(for: c) { c.setY(slot.y) } }
         celebrate(finished)
-        images.prune(keeping: Set(controllers.values.flatMap { c in [c.spec.look, Look(base: c.spec.look.base, palette: c.spec.look.palette, outfit: nil)] }))
+        images.prune(keeping: Set(controllers.values.flatMap { c in
+            [c.spec.look, Look(base: c.spec.look.base, palette: c.spec.look.palette, outfit: nil),
+             Look(base: BeeEgg.base, palette: c.spec.look.palette, outfit: nil)]
+        }))
         wake()
     }
 
@@ -133,7 +154,7 @@ final class MascotDirector {
     func rebuild() {
         images.clear()
         for c in controllers.values { c.relayout() }
-        sync()
+        sync(force: true)
     }
 
     /// High-five for two buddies that finish within 3 s and 300 pt (or next to each other in a group);
@@ -172,6 +193,41 @@ final class MascotDirector {
         wake()
     }
 
+    /// The Bee was just found: it flies across once (not with Reduce Motion), and a callout says where to pick it.
+    func beeFound() {
+        if !model.reduceMotion, !model.buddiesHidden { flight?.close(); flight = BeeFlight(model: model) }
+        closeBeeCallout()
+        let c = Callout(BeeFoundView { [weak self] in self?.closeBeeCallout() }, interactive: true)
+        let screen = NSScreen.visibleFrame()
+        c.place(above: NSRect(x: screen.midX, y: screen.maxY, width: 0, height: 0))
+        beeCallout = c
+        Announcer.say(BeeFoundView.spoken)
+        Sounds.shared.play(.bee, session: nil, model: model)
+        // 20 s unattended: the count starts again while the pointer is on it or it has focus.
+        beeCalloutTimer = Task { [weak self, weak c] in
+            var unattended = 0
+            while unattended < 20 {
+                guard (try? await Task.sleep(for: .seconds(1))) != nil, let c else { return }
+                unattended = c.isKey || NSMouseInRect(NSEvent.mouseLocation, c.frame, false) ? 0 : unattended + 1
+            }
+            self?.closeBeeCallout()
+        }
+        wake()
+    }
+
+    private func closeBeeCallout() {
+        beeCalloutTimer?.cancel()
+        beeCalloutTimer = nil
+        beeCallout?.close()
+        beeCallout = nil
+    }
+
+    /// The flight stops at once: hidden buddies or a sleeping screen never leave a frozen bee.
+    private func endFlight() {
+        flight?.close()
+        flight = nil
+    }
+
     func showTip(_ text: String, sessionId: String) {
         controllers.values.first { $0.spec.sessionId == sessionId }?.showTip(text)
         wake()
@@ -193,6 +249,7 @@ final class MascotDirector {
 
     /// Orders every mascot and bubble out (or back in) for "Hide buddies".
     func applyHidden() {
+        if model.buddiesHidden { endFlight() }
         for c in controllers.values { c.setVisible(!model.buddiesHidden) }
         wake()
     }
@@ -222,10 +279,7 @@ final class MascotDirector {
     }
 
     /// Visible frame of the screen holding `p`; the probe sits just inside the group's bottom-right corner.
-    private func bounds(holding p: CGPoint) -> NSRect {
-        let probe = CGPoint(x: p.x - 1, y: p.y + 1)
-        return (NSScreen.screens.first { $0.frame.contains(probe) } ?? NSScreen.main)?.visibleFrame ?? floor
-    }
+    private func bounds(holding p: CGPoint) -> NSRect { NSScreen.visibleFrame(holding: NSRect(x: p.x - 1, y: p.y + 1, width: 1, height: 1)) }
 
     private func groupBounds() -> NSRect { bounds(holding: currentAnchor()) }
 
@@ -296,7 +350,7 @@ final class MascotDirector {
         return BubblePlacement.choose(sprite: sprite, screen: bounds(holding: currentAnchor()), vertical: model.arrangement == .groupedVertical)
     }
 
-    var floor: NSRect { NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900) }
+    var floor: NSRect { NSScreen.visibleFrame() }
 
     /// A spot on the floor not taken by another mascot, scanning from the right.
     func freeX(width: CGFloat, excluding: MascotController? = nil) -> CGFloat {
@@ -320,11 +374,12 @@ final class MascotDirector {
 
     /// Recomputes the tick rate; starts, retimes, or stops the timer.
     func wake() {
-        let moving = controllers.values.contains(where: \.isMoving)
-        let idle = !controllers.isEmpty && controllers.values.allSatisfy(\.isIdle)
+        let moving = flight != nil || controllers.values.contains(where: \.isMoving)
+        let idle = flight == nil && !controllers.isEmpty && controllers.values.allSatisfy(\.isIdle)
         if idle {
-            let fresh = controllers.values.filter { !$0.isParked }
+            let fresh = controllers.values.filter(\.needsPark)
             if !fresh.isEmpty {
+                fresh.forEach { $0.unpark() }
                 // One last step draws the frame, the position, and the tags; then nothing changes until an event.
                 advance(dt: 0)
                 fresh.forEach { $0.park() }
@@ -333,7 +388,7 @@ final class MascotDirector {
             for c in controllers.values { c.unpark() }
         }
         watchMouse(idle && !paused && !model.buddiesHidden)
-        let next = TickPolicy.interval(mascots: controllers.count, moving: moving, fps: model.sheet?.fps ?? 8,
+        let next = TickPolicy.interval(mascots: controllers.count + (flight == nil ? 0 : 1), moving: moving, fps: model.sheet?.fps ?? 8,
                                        paused: paused || model.buddiesHidden, idle: idle)
         guard next != interval else { return }
         interval = next
@@ -356,6 +411,7 @@ final class MascotDirector {
     }
 
     private func advance(dt: Double) {
+        if let f = flight, !f.step(dt: dt, model: model, images: images) { flight = nil }
         let all = Array(controllers.values)
         let active = all.filter { !$0.isLeaving }
         if !isGroupDragging { relayoutGroup() }

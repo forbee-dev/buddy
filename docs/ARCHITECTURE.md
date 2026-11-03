@@ -45,6 +45,8 @@ Subagents: `running`, `needsPermission`, `asking`, `done`, `failed`, `stopped` (
 | Impatience | `Impatience` (Core), `MascotController.stepImpatience` | On the animation tick; the "still waiting" reminder on the reaper tick |
 | Away digest | `AwayDigest` (Core), `AwayWatch` | Screen sleep and wake, session switch, and system idle checked on the reaper tick |
 | High-five, party, tips | `HighFive`, `Tips`, `TipLimiter` (Core), `MascotDirector.celebrate` | On state changes; tips on hook events |
+| Sounds | `SoundGate`, `SoundRules` (Core), `Sounds` (app) | On state changes. One sound per 1.5 s; a held sound is queued with `Task.sleep` |
+| Hidden Bee | `BeeEgg` (Core), `BeeFlight`, `MascotDirector.beeFound` | Once, on unlock. The flight uses the animation tick. See SKINS.md "Hidden extras" |
 | Skins | `SkinLoader`, `SpriteSheet.merged` (Core), `SkinStore` | At start and on a change in the skins folder (a directory event source) |
 | Tokens and cost | `UsageMeter`, `PriceTable` (Core), `UsageWorker` actor | On hook events, at most every 5 s per working session, plus Stop; off the main thread |
 | Name tags | `TagLayout` (Core), `MascotController.layoutTag`, `MascotDirector.tick` | Free mode: spawn, walk, and crowd checks use the wider of sprite and tag; tags that still overlap are cut (tooltip) or stacked, on the animation tick |
@@ -67,5 +69,6 @@ The same renderer makes the menu thumbnails, the Settings preview, and the menu 
 ## Timers
 
 - Animation: one timer for all mascots. It exists only while mascots exist: 8 Hz at rest, 30 Hz while one moves. It pauses when the screens sleep, the user session is inactive, or the buddies are hidden.
+- Idle and done loops are parked as Core Animation animations (in progress).
 - Reaper: every 5 s while sessions exist. It also sends the one "still waiting" reminder and checks system idle for the away digest.
 - No other repeating timer. One-shot waits use `Task.sleep`. Impatience hops, the tip (20 s), and the digest (60 s) run on the animation tick. The skins folder uses a directory event source.

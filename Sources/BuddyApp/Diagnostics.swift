@@ -35,6 +35,9 @@ final class Diagnostics {
         var rows: [DiagRow] = []
         if !model.canInstallHooks {
             rows.append(DiagRow(.bad, "Hooks", "buddy-hook is missing from this app", fix: "Run Buddy from Buddy.app."))
+        } else if HookInstaller.status(settings: settings, hookPath: model.hookPath) == .invalid {
+            rows.append(DiagRow(.bad, "Hooks", "~/.claude/settings.json is not valid JSON or has an unexpected shape",
+                                fix: "Fix the file. Buddy does not change it. Then install hooks."))
         } else {
             let missing = HookInstaller.missingEvents(settings: settings, hookPath: model.hookPath)
             let all = HookInstaller.eventCount

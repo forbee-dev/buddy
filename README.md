@@ -81,7 +81,7 @@ Jump focuses the right terminal tab or editor window. For Claude Desktop, Jump b
 - **While you were away.** After a break, one buddy lists what finished, what waits and which subagents failed. Each line opens its card. The list takes keyboard focus, and it stays open while it has focus, VoiceOver reads it or the pointer is over it. The menu and the palette have **Show last digest**.
 - **Fun extras.** High-fives, a party when every session is done, and a rare tip. Each one has a switch.
 - **Skins, Crate and Mix.** A skin adds palettes, outfits or whole characters. Crate is a pocket-console robot, bundled and off by default. Settings → General → Character → **Mix** gives each session a character from all enabled skins. Write your own: [docs/SKINS.md](docs/SKINS.md).
-- **Tokens and cost.** Each session shows "42.1k tok · $0.31" in Activity, the menu and the palette. The prices are a placeholder table in `prices.json` that you can edit. They are not official numbers. Check anthropic.com/pricing for your plan.
+- **Tokens and cost.** Each session shows "42.1k tok · $0.31" in every bubble header, the buddy tooltip, Activity, the menu and the palette. Settings → General can add the cost to the name tag. The prices are a placeholder table in `prices.json` that you can edit. They are not official numbers. Check anthropic.com/pricing for your plan.
 - **SSH sessions (opt-in).** Show Claude Code sessions that run on another host, through `ssh -R`. Setup and limits: [docs/SSH.md](docs/SSH.md).
 - **Diagnostics.** Settings → Diagnostics shows status rows, the last 50 hook events, and a redacted report you can copy into an issue.
 - **Uninstall.** Menu → **Uninstall Buddy…** lists each step and changes nothing until you click. It removes hooks, the extension, the login item and the data folder.
@@ -122,13 +122,14 @@ You need macOS 14 or later.
 
 Buddy is not notarized yet. The first time you open it, macOS will block it. Go to System Settings, then Privacy & Security, and click **Open Anyway**.
 
-**With Homebrew (after the first release).**
+**With Homebrew.**
 
 ```sh
+brew trust forbee-dev/tap
 brew install --cask forbee-dev/tap/buddy
 ```
 
-See [docs/HOMEBREW.md](docs/HOMEBREW.md). The not-notarized note below applies too.
+Homebrew loads no third-party tap until you trust it. See [docs/HOMEBREW.md](docs/HOMEBREW.md). The not-notarized note above applies too.
 
 **From source.**
 
@@ -161,11 +162,12 @@ Full steps and troubleshooting: [docs/INSTALL.md](docs/INSTALL.md).
 - **Modes.** One mascot per session (the default), or a single buddy with a badge and a session picker.
 - **Subagents and shells.** Settings → General can turn off minis and the shell chip. After an update, click **Install hooks** again.
 - **Size.** Tiny 1x, Small 1.5x, Medium 2x (default), Large 3x, Huge 4x. Settings has a live preview.
-- **Settings tabs.** General, Size, Notifications, Hooks & Extension, SSH, Permissions, Skins, Diagnostics, About. Notifications are set per event type.
+- **Settings tabs.** General, Size, Notifications, Sounds, Hooks & Extension, SSH, Permissions, Skins, Diagnostics, About. Notifications are set per event type.
+- **Sounds.** Short sounds for permissions, questions, done, errors and more. Settings → Sounds: Buddy's own chiptune set, macOS sounds, or none, per event.
 
 | Shortcut | Action |
 | --- | --- |
-| `⌘↩` | Allow / Submit |
+| `⌘↩` | Allow / Submit / Send |
 | `⌘⌫` | Deny |
 | `⌘T` | Answer in terminal / Claude Desktop |
 | `1` to `9` | Pick option N on a question card |
@@ -214,6 +216,8 @@ The sprites are plain JSON. `design/sprites.json` holds 32x32 character grids, p
 
 Open `design/preview.html` in a browser to see every state and every outfit. Add `?character=crate` to see the Crate skin. For a whole new character or a palette pack, see [docs/SKINS.md](docs/SKINS.md). To add an outfit, add a layer to the generator, run it, and check the preview. Outfit contributions are very welcome.
 
+There may be a bee somewhere.
+
 `docs/assets/make-hero.js` renders the GIF and the outfit grid above from the same data. It needs Node and `ffmpeg`.
 
 ## Project layout
@@ -224,8 +228,10 @@ Sources/BuddyApp     the macOS app
 Sources/buddy-hook   the CLI that each hook runs
 Tests/               tests
 vscode-ext/          companion extension for VS Code and Cursor (TypeScript)
+Resources/           Info.plist, prices.json, chiptune sounds
+packaging/           Homebrew cask template
 design/              sprites, skins (Crate), generator, preview
-scripts/             build and DMG scripts
+scripts/             build, DMG, install, cask and SSH remote scripts
 docs/                install, SSH, skins, releasing, security, architecture, protocol notes
 ```
 

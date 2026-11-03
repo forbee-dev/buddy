@@ -150,3 +150,35 @@ import Testing
         #expect(backups.count == HookInstaller.backupsKept)
     }
 }
+
+@Suite struct InstallerStatusTests {
+    let path = "/Applications/Buddy.app/Contents/MacOS/buddy-hook"
+
+    /// A file Install refuses is "invalid", never "current".
+    @Test func refusedShapeIsInvalid() {
+        #expect(HookInstaller.status(settings: Data(#"{"hooks":{"Stop":"x"}}"#.utf8), hookPath: path) == .invalid)
+        #expect(HookInstaller.status(settings: Data(#"{"hooks":[1]}"#.utf8), hookPath: path) == .invalid)
+        #expect(HookInstaller.status(settings: Data("{broken".utf8), hookPath: path) == .invalid)
+        #expect(HookInstaller.status(settings: Data("[1]".utf8), hookPath: path) == .invalid)
+        #expect(HookInstaller.status(settings: nil, hookPath: path) == .missing)
+        #expect(HookInstaller.status(settings: Data(#"{"model":"opus"}"#.utf8), hookPath: path) == .missing)
+    }
+
+    /// The backup folder cannot be listed (no read permission): the old backups stay, the install goes on.
+    @Test func pruneFailureDoesNotBlockInstall() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("buddy-prune-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer {
+            chmod(dir.path, 0o700)
+            try? FileManager.default.removeItem(at: dir)
+        }
+        let url = dir.appendingPathComponent("settings.json")
+        try Data(#"{"model":"opus"}"#.utf8).write(to: url)
+        #expect(chmod(dir.path, 0o300) == 0)
+        let result = try HookInstaller.apply(install: true, settingsURL: url, hookPath: path)
+        guard case .written(let backup?) = result else { Issue.record("no backup"); return }
+        chmod(dir.path, 0o700)
+        #expect(FileManager.default.fileExists(atPath: backup))
+        #expect(HookInstaller.status(settingsURL: url, hookPath: path) == .current)
+    }
+}

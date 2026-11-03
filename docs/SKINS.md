@@ -84,7 +84,7 @@ A valid skin that is on is still not applied when it adds a legend char or a `co
 Crate is a pocket-console robot: a boxy body with a dark bezel, a green screen for a face, a d-pad, two round buttons, stubby arms, two legs, and an antenna. Its faces are pixels on the screen: code scrolls there while it works, a `?` appears when it asks, a check when it is done, static when it fails, and a screen-saver line when it sleeps.
 
 - Generator: `design/skins/gen-crate.js` (node, no packages). Run `node design/skins/gen-crate.js`. It writes `crate.json` and `crate.js` (for the preview).
-- Check: `node design/check-skin.js` runs the sprite self-check on Crate.
+- Check: `node design/check-skin.js` runs the sprite self-check on Crate and Bee.
 - Preview: open `design/preview.html?character=crate`, or pick **Character → crate** in the preview.
 - It adds one skin outfit, `cartridge`, that fits only Crate.
 
@@ -108,6 +108,21 @@ Smallest useful skin, one outfit:
   ] } }
 }
 ```
+
+## Hidden extras
+
+Spoiler: this section tells you how to find the hidden character.
+
+**Bee** (`design/skins/bee.json`) is a second example character: a round yellow bee with two dark stripes, flapping wings, two antennae, and a tiny stinger. It flies instead of walking, works on a tiny laptop, does a happy jump with honey drops when it is done, lands and folds its wings to sleep, and gets dizzy spiral eyes and a puff of smoke on an error.
+
+- It is bundled, but hidden: Settings → Skins, Character, and Mix do not show it, and no buddy wears it, until you find it.
+- To find it, type `buzz` in the command palette search, or start a Claude Code session in a project whose folder name contains `bee` (for example `forgebee` or `beehive`).
+- On the first find, a small bee flies across the screen (not with Reduce Motion) and a callout says where to pick it. The callout stays at least 20 s, and Esc closes it. The skin is then on, and Bee is in Character and Mix.
+- Settings → General → **ForgeBee subagents fly as bees** (on by default, shown after the find): subagents whose type starts with `forgebee:` show as small bees next to any buddy.
+- Settings → About → **Hide Bee again** hides it until you find it again. Buddies that wear it get another character, as when a skin is removed. After that, only typing `buzz` in the palette unlocks it again. A project name no longer does, and SSH sessions never unlock it.
+- Its body, stripes, and wings have fixed colors (`J`, `j`, `i`, `X`, `w`, `v`, `y`, `p` with `bee*` keys), so it always looks like a bee. Palettes change only the antenna tips, the cheeks, and the outline.
+- It adds one skin outfit, `honey-pot` (Honey pot hat), that fits only the Bee.
+- Generator: `node design/skins/gen-bee.js`. Check: `node design/check-skin.js`. Preview: `design/preview.html?character=bee`.
 
 ## Share a skin
 

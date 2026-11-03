@@ -63,3 +63,22 @@ import Testing
                                            claudePid: disclaimer - 1))
     }
 }
+
+@Suite struct TerminalAskpassTests {
+    @Test func askpassNamesTheEditor() {
+        #expect(TerminalApp.detect(HookEnv(askpassMain: "/Applications/Cursor.app/Contents/Resources/app/extensions/git/dist/askpass-main.js")) == .cursor)
+        #expect(TerminalApp.detect(HookEnv(askpassMain: "/Applications/Visual Studio Code.app/Contents/Resources/app/extensions/git/dist/askpass-main.js"))
+                == .vscode)
+        #expect(TerminalApp.detect(HookEnv(askpassMain: "/Users/me/Apps/Code.app/Contents/Resources/app/extensions/git/dist/askpass-main.js"))
+                == .vscode)
+        #expect(TerminalApp.detect(HookEnv(termProgram: "WezTerm", askpassMain: "/opt/other/askpass.js")) == .other("WezTerm"))
+    }
+
+    /// The bundle id the hook saw wins over the askpass path and TERM_PROGRAM.
+    @Test func bundleIdWins() {
+        let cursorAskpass = "/Applications/Cursor.app/Contents/Resources/app/extensions/git/dist/askpass-main.js"
+        #expect(TerminalApp.detect(HookEnv(termProgram: "vscode", bundleId: "com.microsoft.VSCode", askpassMain: cursorAskpass)) == .vscode)
+        #expect(TerminalApp.detect(HookEnv(termProgram: "vscode", bundleId: "com.googlecode.iterm2", askpassMain: cursorAskpass)) == .iterm)
+        #expect(TerminalApp.detect(HookEnv(termProgram: "vscode", askpassMain: cursorAskpass)) == .cursor)
+    }
+}

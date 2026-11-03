@@ -115,7 +115,11 @@ extension AppModel {
         let status = canInstallHooks ? HookInstaller.status(settingsURL: settingsURL, hookPath: hookPath) : .missing
         hooksInstalled = status == .current
         hooksOutdated = status == .outdated
+        hooksInvalid = status == .invalid
     }
+
+    /// " Backup: settings.json.buddy-backup-…" after a written settings file, else "".
+    static func backupNote(_ backup: String?) -> String { backup.map { " Backup: \(($0 as NSString).lastPathComponent)" } ?? "" }
 
     func installHooks(_ install: Bool) {
         guard canInstallHooks else { installMessage = "buddy-hook not found. Run Buddy from Buddy.app."; return }
@@ -124,7 +128,7 @@ extension AppModel {
             case .unchanged: installMessage = install ? "Hooks already installed." : "No Buddy hooks to remove."
             case .written(let backup):
                 installMessage = (install ? "Hooks installed." : "Hooks removed.")
-                    + (backup.map { " Backup: \(($0 as NSString).lastPathComponent)" } ?? "")
+                    + Self.backupNote(backup)
                     + " New Claude sessions use them."
             }
         } catch {

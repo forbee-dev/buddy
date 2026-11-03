@@ -114,3 +114,22 @@ public struct LookBook: Sendable {
     public mutating func keep(_ keys: Set<String>) { looks = looks.filter { keys.contains($0.key) } }
     public mutating func clear() { looks = [:] }
 }
+
+/// Sprites, skins, or the character changed: each buddy keeps its look where it is still valid.
+public enum LookRefresh {
+    /// One character (`mix` false): every look switches to `bases[0]`. Mix: a look whose character is gone is dropped,
+    /// so it gets a new one. A look whose palette is gone is dropped; an outfit that no longer fits comes off.
+    public static func refresh(_ looks: [String: Look], sheet: SpriteSheet, bases: [String], mix: Bool) -> [String: Look] {
+        var out: [String: Look] = [:]
+        for (key, l) in looks where sheet.palettes[l.palette] != nil {
+            var n = l
+            if !bases.contains(n.base) {
+                guard !mix, let only = bases.first else { continue }
+                n.base = only
+            }
+            if let o = n.outfit, !sheet.outfits(fitting: n.base).contains(o) { n.outfit = nil }
+            out[key] = n
+        }
+        return out
+    }
+}

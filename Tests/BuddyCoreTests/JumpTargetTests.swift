@@ -56,3 +56,20 @@ struct JumpTargetTests {
         #expect(m2.workspaceFolders == ["/a"])
     }
 }
+
+@Suite struct SafeTTYTests {
+    /// Only ASCII letters and digits reach the AppleScript: quotes and spaces cannot end the string.
+    @Test func injectionIsStripped() {
+        #expect(JumpTarget.safeTTY("ttys003\" then do shell script \"x") == "/dev/ttys003thendoshellscriptx")
+        #expect(JumpTarget.safeTTY("ttys003") == "/dev/ttys003")
+    }
+
+    @Test func emptyAndOddInput() {
+        // "/dev/" matches no tty, so the script does nothing.
+        #expect(JumpTarget.safeTTY("") == "/dev/")
+        #expect(JumpTarget.safeTTY("/dev/ttys004") == "/dev/devttys004")
+        #expect(JumpTarget.safeTTY("../../etc/passwd") == "/dev/etcpasswd")
+        #expect(JumpTarget.safeTTY("ttys\u{0}0\n5é") == "/dev/ttys05")
+        #expect(JumpTarget.safeTTY("ｔｔｙ１") == "/dev/")
+    }
+}

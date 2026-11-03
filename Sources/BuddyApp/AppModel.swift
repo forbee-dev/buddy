@@ -20,6 +20,8 @@ final class AppModel {
     var hooksInstalled = false
     /// Buddy hooks exist but lack events this version uses.
     var hooksOutdated = false
+    /// settings.json has a shape Install refuses to change.
+    var hooksInvalid = false
     private(set) var editorsConnected: [String] = []
     /// Connected extensions (editor, version), one per editor window. For Diagnostics.
     var extClients: [(editor: String, version: String)] = []
@@ -39,7 +41,8 @@ final class AppModel {
 
     var mode: MascotMode { didSet { defaults.set(mode.rawValue, forKey: PrefKey.mode); changed() } }
     var arrangement: Arrangement { didSet { defaults.set(arrangement.rawValue, forKey: PrefKey.arrangement); director?.arrangementChanged() } }
-    var walking: Bool { didSet { defaults.set(walking, forKey: PrefKey.walking) } }
+    /// Parked buddies start (or stop) their idle walks at once.
+    var walking: Bool { didSet { defaults.set(walking, forKey: PrefKey.walking); director?.motionChanged() } }
     var size: BuddySize { didSet { defaults.set(size.rawValue, forKey: PrefKey.size); director?.rebuild() } }
     /// All mascot and bubble panels ordered out; menu and notifications keep working.
     var buddiesHidden: Bool { didSet { defaults.set(buddiesHidden, forKey: PrefKey.buddiesHidden); director?.applyHidden() } }
@@ -55,9 +58,23 @@ final class AppModel {
     /// Minutes away before Buddy shows a digest on return; 0 = off.
     var awayMinutes: Int { didSet { defaults.set(awayMinutes, forKey: PrefKey.awayMinutes) } }
     var funExtras: Bool { didSet { defaults.set(funExtras, forKey: PrefKey.funExtras) } }
+    /// The hidden Bee skin was found (BeeEgg). Locked again from Settings → About.
+    var beeUnlocked: Bool { didSet { defaults.set(beeUnlocked, forKey: PrefKey.beeUnlocked); SkinStore.shared.reload() } }
+    /// "Hide Bee again" was used: only the palette's `buzz` unlocks it now.
+    var beeHidden: Bool { didSet { defaults.set(beeHidden, forKey: PrefKey.beeHidden) } }
+    /// `forgebee:` subagents fly as bee minis (only while the Bee is unlocked).
+    var forgeBeeMinis: Bool { didSet { defaults.set(forgeBeeMinis, forKey: PrefKey.forgeBeeMinis); director?.rebuild() } }
     /// A base name, or `AppModel.mix` for a character per session from every enabled one.
     var character: String { didSet { defaults.set(character, forKey: PrefKey.character); refreshLooks() } }
-    var showUsage: Bool { didSet { defaults.set(showUsage, forKey: PrefKey.showUsage); if showUsage { sessions.forEach { refreshUsage($0.id, force: true) } } } }
+    var showUsage: Bool {
+        didSet {
+            defaults.set(showUsage, forKey: PrefKey.showUsage)
+            if showUsage { sessions.forEach { refreshUsage($0.id, force: true) } }
+            changed()
+        }
+    }
+    /// "project · $0.31" on the name tag; needs `showUsage`.
+    var costOnTag: Bool { didSet { defaults.set(costOnTag, forKey: PrefKey.costOnTag); changed() } }
     /// Token sums per session and model, from the transcripts.
     private(set) var usage: [String: [String: TokenCounts]] = [:]
     private(set) var prices: PriceTable?
@@ -143,7 +160,11 @@ final class AppModel {
         awayMinutes = d.int(PrefKey.awayMinutes, default: 5)
         funExtras = d.bool(PrefKey.funExtras, default: true)
         showUsage = d.bool(PrefKey.showUsage, default: true)
+        costOnTag = d.bool(forKey: PrefKey.costOnTag)
         character = d.string(forKey: PrefKey.character) ?? "clawd"
+        beeUnlocked = d.bool(forKey: PrefKey.beeUnlocked)
+        beeHidden = d.bool(forKey: PrefKey.beeHidden)
+        forgeBeeMinis = d.bool(PrefKey.forgeBeeMinis, default: true)
         let card = HotkeyChoice(rawValue: d.string(forKey: PrefKey.hotkey) ?? "") ?? .ctrlOptB
         hotkey = card
         let palette = HotkeyChoice(rawValue: d.string(forKey: PrefKey.paletteHotkey) ?? "") ?? .ctrlOptSpace
@@ -398,8 +419,9 @@ final class AppModel {
 
     private func handleHook(_ msg: HookMessage, from conn: Connection, origin: RemoteOrigin? = nil) {
         let sid = msg.payload["session_id"]?.string
-        let before = sid.flatMap { store.sessions[$0]?.state }
-        let isNew = sid.map { store.sessions[$0] == nil } ?? false
+        let old = sid.flatMap { store.sessions[$0] }
+        let before = old?.state
+        let isNew = sid != nil && old == nil
         let change = store.apply(msg, origin: origin)
         replyNull(change.staleRequests)
         if let sid, isNew || msg.payload["hook_event_name"]?.string == "SessionStart" { checkClaudeApp(sid) }
@@ -417,6 +439,10 @@ final class AppModel {
             afterChange(sid, before: before)
             refreshUsage(sid, force: msg.payload["hook_event_name"]?.string == "Stop")
             maybeTip(sid)
+            if let s = store.sessions[sid], !s.hidden, showMinis, SoundRules.subagentFinished(before: old, after: s) {
+                Sounds.shared.play(.subagentDone, session: s, model: self)
+            }
+            if let s = store.sessions[sid] { findBee(.project(s.folderName, remote: s.remote != nil)) }
         }
         startReaper()
     }
@@ -445,9 +471,10 @@ final class AppModel {
         ext.closed(conn)
         for (id, sid) in replies.closed(conn) {
             let tool = store.sessions[sid]?.pending?.toolName
+            let before = store.sessions[sid]?.state
             if store.requestClosed(sid: sid, requestId: id) {
                 record(sid, "PermissionRequest", tool, "closed by Claude Code")
-                afterChange(sid, before: nil)
+                afterChange(sid, before: before)
             }
         }
     }
@@ -467,7 +494,11 @@ final class AppModel {
 
     private func afterChange(_ sid: String, before: SessionState?) {
         if let s = store.sessions[sid] {
-            if s.state != before || notifier?.isNewRequest(s) == true { notifier?.post(for: s, model: self) }
+            if s.state != before || notifier?.isNewRequest(s) == true {
+                let posted = notifier?.post(for: s, model: self) ?? false
+                // Hidden buddies make no sound of their own; a posted notification still gets its one.
+                if !s.hidden, !buddiesHidden || posted, let e = SoundRules.event(for: s.state) { Sounds.shared.play(e, session: s, model: self) }
+            }
             if s.pending == nil { notifier?.clear(sessionId: sid) }
             if s.state == .ended { scheduleRemoval(sid) }
         }
@@ -616,20 +647,38 @@ final class AppModel {
     func refreshLooks() {
         lookCache.removeAll()
         guard let sheet else { return }
-        let chars = characters
-        var keep = Set<String>()
-        for (key, l) in lookBook.looks where sheet.palettes[l.palette] != nil {
-            var n = l
-            if !chars.contains(n.base) {
-                guard character != Self.mix, let only = chars.first else { continue }
-                n.base = only
-            }
-            if let o = n.outfit, !sheet.outfits(fitting: n.base).contains(o) { n.outfit = nil }
-            lookBook.set(key, n)
-            keep.insert(key)
-        }
-        lookBook.keep(keep)
+        let kept = LookRefresh.refresh(lookBook.looks, sheet: sheet, bases: characters, mix: character == Self.mix)
+        lookBook.keep(Set(kept.keys))
+        for (key, l) in kept { lookBook.set(key, l) }
         director?.rebuild()
+    }
+
+    /// The palette query or a project name may unlock the Bee (`BeeEgg.unlocks`).
+    func findBee(_ t: BeeEgg.Trigger) {
+        if !beeUnlocked, BeeEgg.unlocks(t, hidden: beeHidden) { unlockBee() }
+    }
+
+    /// Settings → About. Buddies that wear the Bee get another character.
+    func hideBee() {
+        beeHidden = true
+        if beeUnlocked { beeUnlocked = false }
+    }
+
+    /// Once: the Bee skin loads, flies across, and a callout says where to pick it.
+    private func unlockBee() {
+        guard !beeUnlocked else { return }
+        beeHidden = false
+        beeUnlocked = true
+        Task { [weak self] in
+            await SkinStore.shared.loading?.value
+            self?.director?.beeFound()
+        }
+    }
+
+    /// The mini's character: the parent's, or the Bee for a `forgebee:` subagent once the Bee is found.
+    func miniBase(_ agent: Subagent, parent: String) -> String {
+        BeeEgg.miniBase(agentType: agent.type, parent: parent, unlocked: beeUnlocked, enabled: forgeBeeMinis,
+                        available: sheet?.bases[BeeEgg.base] != nil)
     }
 
     /// Enabled skins changed.
@@ -703,18 +752,34 @@ final class AppModel {
                 await usageWorker.forget(sid)
                 return
             }
-            if let totals, usage[sid] != totals { usage[sid] = totals }
+            // The tag, tooltip, and sprite label read it through the specs.
+            if let totals, usage[sid] != totals { usage[sid] = totals; changed() }
             if usageAgain.remove(sid) != nil { refreshUsage(sid, force: true) }
         }
     }
 
-    /// "42.1k tok · $0.31" (tokens only when a model has no price), or nil when off or unknown.
-    func usageText(_ sid: String) -> String? {
-        // No transcript access over SSH.
-        if showUsage, store.sessions[sid]?.remote != nil { return "remote" }
-        guard showUsage, let u = usage[sid], u.values.contains(where: { $0.total > 0 }) else { return nil }
-        return UsageFormat.line(u, prices: prices)
+    /// The token sums of these sessions when usage shows and some tokens were counted. Never for SSH: no transcript access.
+    private func usageTotals(_ sids: [String]) -> [String: TokenCounts]? {
+        guard showUsage else { return nil }
+        let known = sids.compactMap { sid in usage[sid].flatMap { store.sessions[sid]?.remote == nil && UsageFormat.total($0) > 0 ? $0 : nil } }
+        return known.isEmpty ? nil : UsageFormat.sum(known)
     }
+
+    /// "42.1k tok · $0.31" (tokens only when a model has no price), or nil when off or unknown.
+    /// `spoken`: the VoiceOver form, "42.1 thousand tokens, 31 cents".
+    func usageText(_ sid: String, spoken: Bool = false) -> String? { usageText([sid], spoken: spoken) }
+
+    /// The sum of several sessions (single buddy mode); "remote" for one SSH session.
+    func usageText(_ sids: [String], spoken: Bool = false) -> String? {
+        if showUsage, sids.count == 1, store.sessions[sids[0]]?.remote != nil { return "remote" }
+        return usageTotals(sids).map { spoken ? UsageFormat.spoken($0, prices: prices) : UsageFormat.line($0, prices: prices) }
+    }
+
+    /// The name tag's "$0.31" (or "42k"), when that setting is on.
+    func tagUsage(_ sids: [String]) -> String? { UsageFormat.tag(usageTotals(sids), prices: prices, costOnTag: costOnTag) }
+
+    /// A bubble opened: read the transcript now when the session has no totals yet.
+    func usageForBubble(_ sid: String) { if usage[sid] == nil { refreshUsage(sid, force: true) } }
 
     var pricesPath: String { UninstallPlan.supportFolder(home: NSHomeDirectory()) + "/prices.json" }
 
@@ -756,7 +821,8 @@ final class AppModel {
             waiting.insert(key)
             guard !s.hidden, Impatience.level(waited: now.timeIntervalSince(since), after: after) == 2,
                   renotified.insert(key).inserted else { continue }
-            notifier?.post(for: s, model: self, stillWaiting: Impatience.minutes(now.timeIntervalSince(since)))
+            let posted = notifier?.post(for: s, model: self, stillWaiting: Impatience.minutes(now.timeIntervalSince(since))) ?? false
+            if !buddiesHidden || posted { Sounds.shared.play(.reminder, session: s, model: self) }
         }
         // Keys of waits that ended are dropped; a wait that goes on keeps its one reminder.
         renotified.formIntersection(waiting)
@@ -768,6 +834,7 @@ final class AppModel {
         guard let sid = AwayDigest.focus(lines) else { return }
         lastDigest = (lines, sid)
         director?.showDigest(lines, sessionId: sid)
+        Sounds.shared.play(.digest, session: nil, model: self)
     }
 
     /// From the menu bar or the palette.

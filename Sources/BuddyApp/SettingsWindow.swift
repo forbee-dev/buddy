@@ -1,7 +1,7 @@
 import SwiftUI
 import BuddyCore
 
-enum SettingsTab: String { case general, size, notifications, hooks, ssh, permissions, skins, diagnostics, about }
+enum SettingsTab: String { case general, size, notifications, sounds, hooks, ssh, permissions, skins, diagnostics, about }
 
 /// Selected tab, outside the view so a launch argument or a menu item can pick it.
 @MainActor
@@ -20,12 +20,13 @@ struct SettingsView: View {
             GeneralTab(model: model).tabItem { Label("General", systemImage: "gearshape") }.tag(SettingsTab.general)
             SizeTab(model: model).tabItem { Label("Size", systemImage: "arrow.up.left.and.arrow.down.right") }.tag(SettingsTab.size)
             NotificationsTab(model: model).tabItem { Label("Notifications", systemImage: "bell") }.tag(SettingsTab.notifications)
+            SoundsTab(model: model).tabItem { Label("Sounds", systemImage: "speaker.wave.2") }.tag(SettingsTab.sounds)
             HooksTab(model: model).tabItem { Label("Hooks & Extension", systemImage: "link") }.tag(SettingsTab.hooks)
             SSHTab(model: model).tabItem { Label("SSH", systemImage: "network") }.tag(SettingsTab.ssh)
             PermissionRows().padding(20).tabItem { Label("Permissions", systemImage: "lock") }.tag(SettingsTab.permissions)
             SkinsTab(model: model).tabItem { Label("Skins", systemImage: "paintpalette") }.tag(SettingsTab.skins)
             DiagnosticsTab(model: model).tabItem { Label("Diagnostics", systemImage: "stethoscope") }.tag(SettingsTab.diagnostics)
-            AboutTab().tabItem { Label("About", systemImage: "info.circle") }.tag(SettingsTab.about)
+            AboutTab(model: model).tabItem { Label("About", systemImage: "info.circle") }.tag(SettingsTab.about)
         }
         .frame(width: 760, height: 440)
     }
@@ -71,7 +72,14 @@ private struct GeneralTab: View {
             Toggle("Fun extras", isOn: $model.funExtras)
             Text("High-fives, a party when all sessions finish, and rare tips. Reduce Motion turns off the moving ones.")
                 .font(.caption).foregroundStyle(.secondary)
+            if model.beeUnlocked {
+                Toggle("ForgeBee subagents fly as bees", isOn: $model.forgeBeeMinis)
+                    .help("Subagents whose type starts with forgebee: show as small bees next to any buddy.")
+            }
             Toggle("Show tokens and cost", isOn: $model.showUsage)
+            Toggle("Show cost on the buddy's name tag", isOn: $model.costOnTag)
+                .disabled(!model.showUsage)
+                .help("The tag reads \"project · $0.31\", or \"42k\" tokens when a model has no price.")
             HStack {
                 Text(model.pricesError ?? "Prices come from prices.json. Placeholders: check them for your plan.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -87,7 +95,8 @@ private struct GeneralTab: View {
             Picker("Open command palette", selection: $model.paletteHotkey) {
                 ForEach(HotkeyChoice.allCases) { Text($0.label).tag($0) }
             }
-            .help("Global shortcut for the session list. Picking the other shortcut's key swaps the two.")
+            .help("Global shortcut for the session list.")
+            Text("Picking the other shortcut's key swaps the two.").font(.caption).foregroundStyle(.secondary)
             if let m = services.message { Text(m).font(.caption) }
         }
         .formStyle(.grouped)
@@ -151,6 +160,59 @@ private struct NotificationsTab: View {
     }
 }
 
+private struct SoundsTab: View {
+    let model: AppModel
+    @Bindable var sounds = Sounds.shared
+
+    var body: some View {
+        Form {
+            Toggle("Play sounds", isOn: $sounds.on)
+            Group {
+                Picker("Sound set", selection: $sounds.set) {
+                    ForEach(SoundSet.allCases) { Text($0.label).tag($0) }
+                }
+                .help("Buddy chiptune: short 8-bit sounds made for Buddy. macOS sounds: pick one per event.")
+                Section("Play a sound when") {
+                    // The Bee row stays hidden until the Bee is found.
+                    ForEach(SoundEvent.allCases.filter { $0 != .bee || model.beeUnlocked }) { row($0) }
+                }
+                Slider(value: $sounds.volume, in: 0...1) { Text("Volume") }
+                    .accessibilityValue("\(Int((sounds.volume * 100).rounded())) percent")
+                Toggle("Only when the session's app is not in front", isOn: $sounds.onlyWhenNotFront)
+                    .help("No sound when the session's terminal, editor, or Claude Desktop is the front app: you already see it.")
+                Toggle("Also when notifications are off", isOn: $sounds.alsoWhenNotificationsOff)
+                    .help("Permission, question, and done sounds play even when their notification is off in Settings → Notifications.")
+            }
+            .disabled(!sounds.on)
+            // Stays on with "Play sounds" off: it is the notification's own sound.
+            Toggle("Notification banner sound", isOn: $sounds.bannerSound)
+            Text("The macOS alert sound on notifications, only for events Buddy plays no sound for. So you hear one sound, never two.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("Sounds add to the buddy, the card, and VoiceOver. They never replace them. At most one sound plays every 1.5 s; the most important one wins.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .formStyle(.grouped)
+    }
+
+    private func row(_ e: SoundEvent) -> some View {
+        HStack {
+            Toggle(e.label, isOn: Binding(get: { sounds.isOn(e) }, set: { sounds.setOn(e, $0) }))
+            if sounds.set == .system {
+                Picker("\(e.label) sound", selection: Binding(get: { sounds.systemName(e) }, set: { sounds.setSystemName(e, $0) })) {
+                    ForEach(SoundSet.systemNames, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden()
+                .frame(width: 120)
+            }
+            Button { sounds.preview(e) } label: { Image(systemName: "play.fill").frame(minWidth: 24, minHeight: 24) }
+                .buttonStyle(.borderless)
+                .disabled(sounds.set == .none)
+                .accessibilityLabel("Play the \(e.label) sound")
+                .help("Play")
+        }
+    }
+}
+
 /// Hooks install/uninstall plus the companion extension; shared with onboarding.
 struct HooksSection: View {
     let model: AppModel
@@ -165,6 +227,9 @@ struct HooksSection: View {
             Text("Claude Code hooks: \(model.hooksInstalled ? "installed" : "not installed")").font(.headline)
                 .accessibilityAddTraits(.isHeader)
             if model.hooksOutdated { WarningText(text: "New hook events available: click Install hooks.") }
+            if model.hooksInvalid {
+                WarningText(text: "~/.claude/settings.json is not valid JSON or has an unexpected shape. Buddy does not change it: fix the file first.")
+            }
             HStack {
                 Button("Install hooks") { model.installHooks(true) }.disabled(model.hooksInstalled)
                 Button("Uninstall hooks") { model.installHooks(false) }
@@ -244,11 +309,31 @@ private struct SkinsTab: View {
 }
 
 private struct AboutTab: View {
+    let model: AppModel
+
     var body: some View {
         VStack(spacing: 8) {
             Text("Buddy").font(.title.bold())
             Text("Version \(AppServices.version)").textSelection(.enabled)
             Text("One mascot per Claude Code session.").foregroundStyle(.secondary)
+            // The row stays after "Hide Bee again", so the button keeps keyboard focus.
+            if model.beeUnlocked || model.beeHidden {
+                VStack(spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(model.beeUnlocked ? "Bee unlocked. Pick it in Settings → General → Character." : "Bee hidden.")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .accessibilityLabel(model.beeUnlocked ? "Bee unlocked. Pick it in Settings, General, Character." : "Bee hidden.")
+                        Button("Hide Bee again") {
+                            model.hideBee()
+                            Announcer.say("Bee hidden.")
+                        }
+                        .controlSize(.small)
+                    }
+                    Text("Hides the Bee until you find it again. Buddies that wear it get another character.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(.top, 8)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

@@ -208,7 +208,7 @@ struct OptionRowStyle: ButtonStyle {
     let selected: Bool
     let hovered: Bool
     let focused: Bool
-    /// Increase Contrast: a full-opacity cursor stroke.
+    /// Increase Contrast: a stronger border on unselected rows.
     var highContrast = false
 
     func makeBody(configuration: Configuration) -> some View {
@@ -217,7 +217,7 @@ struct OptionRowStyle: ButtonStyle {
         configuration.label
             .background(RoundedRectangle(cornerRadius: 10).fill(fill))
             .overlay(RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(selected ? Color.accentColor : focused ? Color.accentColor.opacity(highContrast ? 1 : 0.6) : Color.primary.opacity(0.12),
+                .strokeBorder(selected || focused ? Color.accentColor : Color.primary.opacity(highContrast ? 0.6 : 0.3),
                               lineWidth: selected || focused ? 1.5 : 1))
             .contentShape(RoundedRectangle(cornerRadius: 10))
     }
@@ -390,7 +390,7 @@ struct QuestionCard: View {
 
     private func mark(selected: Bool, multi: Bool) -> some View {
         Image(systemName: multi ? (selected ? "checkmark.square.fill" : "square") : (selected ? "checkmark.circle.fill" : "circle"))
-            .foregroundStyle(selected ? Color.accentColor : highContrast ? Color.primary : Color.secondary.opacity(0.6))
+            .foregroundStyle(selected ? Color.accentColor : highContrast ? Color.primary : Color.secondary)
             .font(.title3)
             .accessibilityHidden(true)
     }

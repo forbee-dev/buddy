@@ -1,11 +1,6 @@
 // Generates crate.json: "Crate", a pocket-console robot, as a Buddy skin character. Run: node gen-crate.js [--ascii state frame]
 // Original art: a boxy handheld with a face on its screen, a d-pad, two round buttons, stubby arms, and an antenna.
-const fs = require('fs'), path = require('path');
-const N = 32;
-const mk = () => Array.from({ length: N }, () => Array(N).fill('.'));
-const put = (g, x, y, c) => { if (x >= 0 && x < N && y >= 0 && y < N) g[y][x] = c; };
-const rect = (g, x0, y0, x1, y1, c) => { for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) put(g, x, y, c); };
-const shape = (x0, y0, rows) => rows.flatMap((r, j) => [...r].flatMap((ch, i) => ch === '.' ? [] : [[x0 + i, y0 + j, ch]]));
+const { mk, put, rect, shape, outline, skinMain } = require('../pixel');
 
 // ---- body: interior x 6..25, rows top..bot (21 rows), 1-px K outline added around the silhouette ----
 // TOP0 9: hats made for the built-in head sit 2 px into the box top, so tall hats keep their tips.
@@ -86,10 +81,7 @@ function frame(p) {
   });
   arm('L', p.armL || 'down'); arm('R', p.armR || 'down');
   rect(g, 20 + dx, top - 5, 21 + dx, top - 4, 'Y'); // antenna ball
-  const snap = g.map(r => r.slice());
-  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-    if (snap[y][x] === '.' && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([a, b]) => (snap[y + b]?.[x + a] ?? '.') !== '.')) put(g, x, y, 'K');
-  }
+  outline(g);
   put(g, 21 + dx, top - 2, 'K'); // antenna stick
   // screen: bezel 16×10, lit area 14×8
   rect(g, 8 + dx, top + 2, 23 + dx, top + 11, 'D');
@@ -178,14 +170,4 @@ const skin = {
   outfits: { cartridge: { label: 'Cartridge', fits: ['crate'], rows: cart.map(r => r.join('')) } },
 };
 
-if (process.argv[2] === '--ascii') {
-  const fr = states[process.argv[3]].frames[+process.argv[4] || 0];
-  console.log(fr.rows.map((r, i) => String(i).padStart(2) + ' ' + r).join('\n'));
-  if (fr.fx) console.log(fr.fx.map((r, i) => String(i).padStart(2) + ' ' + r).join('\n'));
-} else {
-  const json = JSON.stringify(skin, null, 1);
-  fs.writeFileSync(path.join(__dirname, 'crate.json'), json + '\n');
-  // preview.html opened from disk cannot fetch; it loads this copy instead.
-  fs.writeFileSync(path.join(__dirname, 'crate.js'), 'window.CRATE = ' + JSON.stringify(skin) + ';\n');
-  console.log('wrote crate.json', (json.length / 1024).toFixed(0) + ' KB');
-}
+skinMain(__dirname, 'crate', 'CRATE', skin, states);

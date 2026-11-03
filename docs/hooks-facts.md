@@ -386,11 +386,11 @@ Register hooks: `PreToolUse`, `PostToolUse`, `PermissionRequest`, `SubagentStart
 
 (c) Attribute permission cards: put `agent_id` and `agent_type` from `PermissionRequest` into the card (title "<agent_type> subagent wants to run Bash"). Look up the row by `agent_id`. Answer with the same JSON as for a top-level request.
 
-Test files (scratch, not in the app): `scratchpad/w-sub/` (`log.py`, `ps.py`, `perm.py`, `settings*.json`, `ev1-3.jsonl`).
+Test files: a logging hook on all events (not kept in the repo).
 
 ## Edge cases and usage data
 
-Date: 2026-11-03. Claude Code 2.1.317. Tests: `claude -p` and `expect` on a pty, with a logging hook on all events (scratch: `scratchpad/w-edge/`: `log.py`, `settings.json`, `run.exp`, `events.jsonl`).
+Date: 2026-11-03. Claude Code 2.1.317. Tests: `claude -p` and `expect` on a pty, with a logging hook on all events.
 Labels: **TESTED** / **DOCS** / **UNTESTED**. Test note: the user config sets a default agent, so main events carry `agent_type:"forgebee:orchestrator"`. Interactive tests ran in a trusted dir (the trust dialog cannot be skipped on a pty). Interactive runs used Ctrl-C to quit.
 
 ### E1. Background shell started INSIDE a subagent

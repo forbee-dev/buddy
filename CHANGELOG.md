@@ -5,6 +5,40 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 
 ## [Unreleased]
 
+### Added
+- Sounds for permissions, questions, done, errors and more (Settings → Sounds; original chiptune set or macOS sounds).
+- A hidden Bee character (easter egg).
+- Settings → General → Show cost on the buddy's name tag (off by default): "project · $0.31".
+- ForgeBee subagents fly as bee minis once the Bee is found (Settings → General → Fun extras).
+
+### Changed
+- Homebrew: the `forbee-dev/tap` cask is published. Run `brew trust forbee-dev/tap` once before `brew install --cask forbee-dev/tap/buddy`.
+- After "Hide Bee again", only `buzz` in the palette finds the Bee again. SSH projects never unlock it.
+- The Bee callout stays at least 20 s, waits while you point at it, and Esc closes it.
+- Buddies that stand still use no timer, and idle walks start from a delayed task. Three idle sessions use about 0% CPU.
+- With "Play sounds" off, the sound set, volume, and "Only when…" options are disabled.
+- Companion extension 0.1.4: replies to the app go out in request order, a rejected hello closes the socket, and the ext-hello version comes from package.json.
+- Remote uninstall now prunes old settings backups, like install.
+- Build: build-app.sh bundles every skin JSON and rebuilds the icon when make-icon.swift changes; make-icon.swift fails on an unresolved legend slot. CI also runs the sound file check.
+
+### Fixed
+- Tokens and cost now show in every bubble header and the buddy tooltip, and update at once when a bubble opens.
+- No "subagent done" sound after /clear or resume, and no replayed "Claude finished" alert when Claude Code closes a permission hook.
+- A queued permission sound is never dropped when the 1.5 s window ends. A clock set back no longer mutes sounds.
+- An invalid or unexpected ~/.claude/settings.json shows as such in Settings and Diagnostics, not as "installed".
+- A failed prune of old settings backups no longer stops Install hooks.
+- The name tag rounds tokens like the tooltip (42,999 → "43k").
+- Hiding buddies or a sleeping screen stops the Bee flight.
+- Single buddy mode shows the tokens and cost of all visible sessions.
+- Sounds: fixed a click on short notes (question, subagent done).
+
+### Accessibility
+- VoiceOver reads usage as "42.1 thousand tokens, 31 cents". The marked Activity row is "selected". Option rows have stronger borders and marks. Rules that were only tooltips are now visible text.
+- No subagent sound when minis are off, and no state sound while buddies are hidden unless a notification was posted.
+
+### Security
+- Tool names are clipped at 200 characters (app and remote hook). An extra ssh client counts only when its real binary is named `ssh`. Editor names in the log are clipped.
+
 ## [0.3.0] - 2026-11-03
 
 ### Added

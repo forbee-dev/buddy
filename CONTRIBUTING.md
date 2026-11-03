@@ -43,6 +43,7 @@ Extension and sprites:
 (cd vscode-ext && npm ci && npm test)
 node design/check-sprites.js
 node design/check-skin.js
+node design/sounds/gen-sounds.js --check   # chiptune WAV headers
 python3 scripts/remote/test_hook.py   # SSH hook script tests
 ```
 

@@ -16,7 +16,7 @@ final class SpriteImages {
             log.warning("sprites.json: unresolved \(m, privacy: .public); drawn transparent")
             loggedMissing.insert(m)
         }
-        guard let img = makeImage(r) else { return nil }
+        guard let img = Self.makeImage(r) else { return nil }
         cache[look, default: [:]][k] = (img, r)
         return (img, r)
     }
@@ -28,7 +28,7 @@ final class SpriteImages {
         cache = cache.filter { looks.contains($0.key) }
     }
 
-    private func makeImage(_ r: RenderedFrame) -> CGImage? {
+    static func makeImage(_ r: RenderedFrame) -> CGImage? {
         guard let provider = CGDataProvider(data: Data(r.rgba) as CFData),
               let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
         return CGImage(width: r.width, height: r.height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: r.width * 4,

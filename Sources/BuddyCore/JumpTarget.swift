@@ -37,6 +37,9 @@ public enum JumpTarget {
         folder.hasPrefix("/") && !folder.contains("\0") ? [folder] : nil
     }
 
+    /// Only ASCII letters and digits reach the AppleScript, so a tty name cannot inject script. Empty input gives "/dev/", which matches no tty.
+    public static func safeTTY(_ tty: String) -> String { "/dev/" + tty.filter { $0.isASCII && ($0.isLetter || $0.isNumber) } }
+
     public static func cliCandidates(for app: TerminalApp) -> [String] {
         switch app {
         case .cursor:

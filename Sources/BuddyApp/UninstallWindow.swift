@@ -58,7 +58,7 @@ final class UninstallRun {
             do {
                 switch try HookInstaller.apply(install: false, settingsURL: model.settingsURL, hookPath: model.hookPath) {
                 case .unchanged: return (true, "No Buddy hooks were installed.")
-                case .written(let backup): return (true, "Removed." + (backup.map { " Backup: \(($0 as NSString).lastPathComponent)" } ?? ""))
+                case .written(let backup): return (true, "Removed." + AppModel.backupNote(backup))
                 }
             } catch {
                 return (false, "\(error)")

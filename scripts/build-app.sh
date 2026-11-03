@@ -10,10 +10,12 @@ BUILD_NUMBER="$(date +%Y%m%d%H%M)"
 swift build -c release
 BIN="$(swift build -c release --show-bin-path)"
 
-# Icon: regenerate when the sprites changed.
+# Icon: regenerate when the sprites or the icon script changed.
 ICNS="$ROOT/Resources/AppIcon.icns"
-if [ ! -f "$ICNS" ] || [ "$ROOT/design/sprites.json" -nt "$ICNS" ]; then
-  ICONSET="$(mktemp -d)/AppIcon.iconset"
+if [ ! -f "$ICNS" ] || [ "$ROOT/design/sprites.json" -nt "$ICNS" ] || [ "$ROOT/scripts/make-icon.swift" -nt "$ICNS" ]; then
+  TMPD="$(mktemp -d)"
+  trap 'rm -rf "$TMPD"' EXIT
+  ICONSET="$TMPD/AppIcon.iconset"
   swift "$ROOT/scripts/make-icon.swift" "$ROOT/design/sprites.json" "$ICONSET"
   iconutil -c icns "$ICONSET" -o "$ICNS"
 fi
@@ -27,8 +29,11 @@ cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 cp "$ROOT/design/sprites.json" "$APP/Contents/Resources/sprites.json"
 cp "$ROOT/Resources/prices.json" "$APP/Contents/Resources/prices.json"
 mkdir -p "$APP/Contents/Resources/skins"
-cp "$ROOT/design/skins/crate.json" "$APP/Contents/Resources/skins/crate.json"
+cp "$ROOT"/design/skins/*.json "$APP/Contents/Resources/skins/"
 cp "$ICNS" "$APP/Contents/Resources/AppIcon.icns"
+# Chiptune sounds (design/sounds/gen-sounds.js writes them).
+mkdir -p "$APP/Contents/Resources/sounds"
+cp "$ROOT"/Resources/sounds/*.wav "$APP/Contents/Resources/sounds/"
 # SSH sessions: Settings → SSH copies an install command that reads remote/install.sh.
 mkdir -p "$APP/Contents/Resources/remote"
 cp "$ROOT"/scripts/remote/{buddy-hook-remote,install.sh,uninstall.sh} "$APP/Contents/Resources/remote/"

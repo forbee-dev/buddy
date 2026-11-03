@@ -1,6 +1,6 @@
 # Homebrew tap
 
-Users install with `brew install --cask forbee-dev/tap/buddy`. The cask lives in a separate repo, `forbee-dev/homebrew-tap`. The template is `packaging/homebrew/buddy.rb`.
+Users run `brew trust forbee-dev/tap`, then `brew install --cask forbee-dev/tap/buddy`. Homebrew loads no third-party tap until you trust it. The cask lives in a separate repo, `forbee-dev/homebrew-tap`. The template is `packaging/homebrew/buddy.rb`.
 
 ## Create the tap once
 
@@ -34,6 +34,7 @@ Users install with `brew install --cask forbee-dev/tap/buddy`. The cask lives in
 5. Test:
 
    ```sh
+   brew trust forbee-dev/tap
    brew update
    brew install --cask forbee-dev/tap/buddy   # or: brew upgrade --cask buddy
    brew audit --cask --strict forbee-dev/tap/buddy
@@ -41,5 +42,5 @@ Users install with `brew install --cask forbee-dev/tap/buddy`. The cask lives in
 
 ## Notes
 
-- Buddy is not notarized. The cask `caveats` tell users to remove the quarantine flag.
+- Buddy is not notarized. The cask `caveats` tell users to click Open Anyway in System Settings → Privacy & Security.
 - `zap` removes `~/Library/Application Support/Buddy` and the preferences plist. It never touches `~/.claude`. Hooks in `~/.claude/settings.json` stay: tell users to click Uninstall hooks (or Menu → Uninstall Buddy…) in Buddy first.

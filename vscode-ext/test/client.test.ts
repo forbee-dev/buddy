@@ -115,3 +115,63 @@ test("send before hello resolves is queued behind hello", async () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("precheck failure never connects", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bp-"));
+  const sock = path.join(dir, "b.sock");
+  let conns = 0;
+  const srv = await listen(sock, () => conns++);
+  srv.on("connection", () => conns++);
+  const lw = logWaiter();
+  const client = new BuddyClient({
+    socketPath: sock,
+    minDelayMs: 10,
+    maxDelayMs: 20,
+    logThrottleMs: 0,
+    log: lw.log,
+    precheck: () => "wrong owner",
+    hello: async () => ({ kind: "ext-hello" }),
+    onLine: () => undefined,
+  });
+  try {
+    const twice = lw.once("socket untrusted").then(() => lw.once("socket untrusted"));
+    client.start();
+    await twice;
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(conns, 0);
+  } finally {
+    client.stop();
+    await close(srv);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("lines are handled in order even when an earlier one is slow", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bo-"));
+  const sock = path.join(dir, "b.sock");
+  const acks: string[] = [];
+  const srv = await listen(sock, (s, line) => {
+    const m = JSON.parse(line);
+    if (m.kind === "ext-hello") s.write('{"reqId":"slow"}\n{"reqId":"fast"}\n');
+    else acks.push(m.reqId);
+  });
+  const client = new BuddyClient({
+    socketPath: sock,
+    log: () => {},
+    hello: async () => ({ kind: "ext-hello" }),
+    onLine: async (l) => {
+      const reqId = JSON.parse(l).reqId;
+      if (reqId === "slow") await new Promise((r) => setTimeout(r, 100));
+      return { kind: "ack", reqId };
+    },
+  });
+  try {
+    client.start();
+    for (let i = 0; i < 100 && acks.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(acks, ["slow", "fast"]);
+  } finally {
+    client.stop();
+    await close(srv);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -61,6 +61,7 @@ jobs:
         with:
           node-version: 20
       - run: node design/check-sprites.js
+      - run: node design/sounds/gen-sounds.js --check
       - run: node design/check-skin.js
 
   remote:

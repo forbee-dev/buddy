@@ -34,7 +34,7 @@
 </head>
 <body>
 <header>
-  <label>Character <select id="character"><option value="clawd">clawd</option><option value="crate">crate (skin)</option></select></label>
+  <label>Character <select id="character"><option value="clawd">clawd</option><option value="crate">crate (skin)</option><option value="bee">bee (hidden skin)</option></select></label>
   <label>State <select id="state"></select></label>
   <label>Scale <select id="scale"><option>3</option><option selected>4</option><option>6</option></select>x</label>
   <button id="random">Random looks</button>
@@ -50,6 +50,7 @@
 
 <script src="sprites.js"></script>
 <script src="skins/crate.js"></script>
+<script src="skins/bee.js"></script>
 <script>
 // SELFCHECK-START
 // skin: a skin document whose single character is checked (its `colors` keys count as palette keys).
@@ -137,21 +138,22 @@ function selfCheck(d, skin) {
   catch (e) { console.warn('fetch failed, using sprites.js fallback:', e.message); D = window.SPRITES; }
   const chk = document.getElementById('check');
   if (!D) { chk.textContent = 'self-check: no data'; return; }
-  // ?character=crate: the bundled example skin, merged the way the app does (built-in outfits it lists only).
+  // ?character=crate|bee: a bundled skin, merged the way the app does (built-in outfits it lists only).
   const query = new URLSearchParams(location.search);
   let C = 'clawd', SKIN = null;
-  if (query.get('character') === 'crate') {
-    try { const r = await fetch('skins/crate.json'); if (!r.ok) throw new Error(r.status); SKIN = await r.json(); }
-    catch (e) { SKIN = window.CRATE; }
+  const want = query.get('character');
+  if (want === 'crate' || want === 'bee') {
+    try { const r = await fetch('skins/' + want + '.json'); if (!r.ok) throw new Error(r.status); SKIN = await r.json(); }
+    catch (e) { SKIN = want === 'crate' ? window.CRATE : window.BEE; }
     if (SKIN) {
-      const allow = SKIN.bases.crate.outfits;
-      D = { ...D, legend: { ...D.legend, ...SKIN.legend }, bases: { crate: SKIN.bases.crate },
+      const allow = SKIN.bases[want].outfits;
+      D = { ...D, legend: { ...D.legend, ...SKIN.legend }, bases: { [want]: SKIN.bases[want] },
         outfits: Object.fromEntries(Object.entries(D.outfits).filter(([k]) => allow.includes(k))) };
-      C = 'crate';
+      C = want;
     }
   }
   document.getElementById('character').value = C;
-  document.getElementById('character').onchange = e => { location.search = e.target.value === 'crate' ? '?character=crate' : ''; };
+  document.getElementById('character').onchange = e => { location.search = e.target.value === 'clawd' ? '' : '?character=' + e.target.value; };
   const res = selfCheck(D, SKIN);
   chk.textContent = 'self-check: ' + res.pass + ' PASS / ' + res.fail + ' FAIL';
   chk.className = res.fail ? 'fail' : 'pass';

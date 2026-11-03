@@ -39,7 +39,6 @@ struct PaletteView: View {
     let model: AppModel
     @Bindable var palette: PaletteModel
     @FocusState private var searchFocus: Bool
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
@@ -91,11 +90,10 @@ struct PaletteView: View {
         }
         .padding(12)
         .frame(width: 600)
-        .background(RoundedRectangle(cornerRadius: 14).fill(reduceTransparency ? AnyShapeStyle(.background) : AnyShapeStyle(.regularMaterial)))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.separator))
-        .padding(2)
+        .calloutBackground()
         .onChange(of: palette.searchFocused, initial: true) { _, v in if searchFocus != v { searchFocus = v } }
         .onChange(of: searchFocus) { _, v in if palette.searchFocused != v { palette.searchFocused = v } }
+        .onChange(of: palette.query) { _, q in model.findBee(.palette(query: q)) }
     }
 
     private func row(_ s: Session, selected: Bool, now: Date) -> some View {
@@ -143,7 +141,7 @@ struct PaletteView: View {
     }
 
     private func label(_ s: Session, summary: String?, now: Date) -> String {
-        [s.projectName, s.state.label, Self.age(s, now: now), summary, model.usageText(s.id)].compactMap { $0 }.joined(separator: ", ")
+        [s.projectName, s.state.label, Self.age(s, now: now), summary, model.usageText(s.id, spoken: true)].compactMap { $0 }.joined(separator: ", ")
     }
 }
 
@@ -167,7 +165,7 @@ final class PaletteController {
         palette.query = ""
         palette.selectedId = nil
         palette.closeCard()
-        let screen = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? .zero
+        let screen = NSScreen.visibleFrame()
         top = NSPoint(x: screen.midX - 302, y: screen.maxY - screen.height * 0.18)
         panel.setFrameTopLeftPoint(top)
         panel.orderFrontRegardless()

@@ -2,12 +2,13 @@
 """Tests for buddy-hook-remote, install.sh, and uninstall.sh. Every test uses a temp HOME, never the real one.
 
     python3 scripts/remote/test_hook.py           run the tests
-    python3 scripts/remote/test_hook.py --embed   copy buddy-hook-remote into install.sh
+    python3 scripts/remote/test_hook.py --embed   copy buddy-hook-remote and settings-edit.py into install.sh and uninstall.sh
 """
 import json
 import os
 import py_compile
 import re
+import shutil
 import socket
 import stat
 import subprocess
@@ -19,19 +20,24 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, "buddy-hook-remote")
+SETTINGS_EDIT = os.path.join(HERE, "settings-edit.py")
 INSTALL = os.path.join(HERE, "install.sh")
 UNINSTALL = os.path.join(HERE, "uninstall.sh")
 TOKEN = "ab" * 32
 EMBED = re.compile(r"(<<'BUDDY_HOOK_EOF'\n)(.*?)(\nBUDDY_HOOK_EOF\n)", re.S)
+EMBED_PY = re.compile(r"(<<'BUDDY_PY_EOF'\n)(.*?)(\nBUDDY_PY_EOF\n)", re.S)
 
 
 def embed():
     with open(HOOK) as f:
         hook = f.read().rstrip("\n")
-    with open(INSTALL) as f:
-        text = f.read()
-    with open(INSTALL, "w") as f:
-        f.write(EMBED.sub(lambda m: m.group(1) + hook + m.group(3), text, count=1))
+    with open(SETTINGS_EDIT) as f:
+        edit = f.read().rstrip("\n")
+    for path, pattern, body in ((INSTALL, EMBED, hook), (INSTALL, EMBED_PY, edit), (UNINSTALL, EMBED_PY, edit)):
+        with open(path) as f:
+            text = f.read()
+        with open(path, "w") as f:
+            f.write(pattern.sub(lambda m: m.group(1) + body + m.group(3), text, count=1))
 
 
 class Server:
@@ -80,7 +86,10 @@ class Server:
 class Home(unittest.TestCase):
     def setUp(self):
         self.home = tempfile.mkdtemp(prefix="buddy-home-")
-        self.sock = os.path.join(tempfile.mkdtemp(prefix="bs-", dir="/tmp"), "s.sock")
+        sockdir = tempfile.mkdtemp(prefix="bs-", dir="/tmp")
+        self.addCleanup(shutil.rmtree, self.home, True)
+        self.addCleanup(shutil.rmtree, sockdir, True)
+        self.sock = os.path.join(sockdir, "s.sock")
         self.env = dict(os.environ, HOME=self.home, BUDDY_REMOTE_SOCK=self.sock, CLAUDE_PID="4242",
                         SSH_CONNECTION="10.0.0.1 5000 10.0.0.2 22")
         self.env.pop("SSH_TTY", None)
@@ -102,6 +111,14 @@ class Home(unittest.TestCase):
 class HookTests(Home):
     def test_compiles(self):
         py_compile.compile(HOOK, cfile=os.path.join(self.home, "hook.pyc"), doraise=True)
+
+    def test_tool_name_is_capped(self):
+        self.write_token()
+        srv = Server(self.sock)
+        self.hook(json.dumps({"session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "t" * 300}).encode())
+        srv.join()
+        self.assertIsNotNone(srv.message)
+        self.assertEqual(srv.message["payload"]["tool_name"], "t" * 200 + "…")
 
     def test_sends_token_and_slim_payload(self):
         self.write_token()
@@ -247,6 +264,15 @@ class InstallTests(Home):
             self.assertEqual(found.group(2), f.read().rstrip("\n"),
                              "run: python3 scripts/remote/test_hook.py --embed")
 
+    def test_embedded_settings_edit_matches_file(self):
+        with open(SETTINGS_EDIT) as f:
+            edit = f.read().rstrip("\n")
+        for script in (INSTALL, UNINSTALL):
+            with open(script) as g:
+                found = EMBED_PY.search(g.read())
+            self.assertIsNotNone(found, script)
+            self.assertEqual(found.group(2), edit, "run: python3 scripts/remote/test_hook.py --embed")
+
     def test_install_is_idempotent_and_private(self):
         os.makedirs(os.path.join(self.home, ".claude"))
         user = {"theme": "dark", "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo mine"}]}]}}
@@ -337,7 +363,7 @@ class InstallTests(Home):
         r = subprocess.run([os.path.join(self.home, ".buddy", "bin", "buddy-hook-remote")],
                            input=b'{"session_id":"s1","hook_event_name":"Stop"}', env=env, capture_output=True, timeout=10)
         srv.join()
-        assert srv.message is not None
+        self.assertIsNotNone(srv.message)
         self.assertEqual((r.returncode, srv.message["token"]), (0, TOKEN))
 
 
