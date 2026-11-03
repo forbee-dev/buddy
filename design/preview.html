@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Buddy sprite preview</title>
+<style>
+  body { margin: 0; font: 14px/1.4 system-ui, sans-serif; color: #222; background: #eceef2; }
+  header { padding: 10px 16px; background: #fff; border-bottom: 1px solid #d0d3da; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  label { display: inline-flex; gap: 6px; align-items: center; }
+  button, select { font: inherit; padding: 3px 6px; }
+  #check { margin-left: auto; font-weight: 700; padding: 3px 10px; border-radius: 4px; }
+  .pass { background: #c9f2d3; color: #0d5a25; }
+  .fail { background: #ffd0d0; color: #8a0f0f; }
+  main { padding: 16px; display: flex; flex-wrap: wrap; gap: 16px; justify-content: center; }
+  .card { background: #fff; border: 1px solid #d0d3da; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .stage, #walkway {
+    background-color: #f4f5f8;
+    background-image: linear-gradient(45deg, #dfe2e8 25%, transparent 25%, transparent 75%, #dfe2e8 75%),
+                      linear-gradient(45deg, #dfe2e8 25%, transparent 25%, transparent 75%, #dfe2e8 75%);
+    background-size: 16px 16px; background-position: 0 0, 8px 8px;
+  }
+  canvas { image-rendering: pixelated; display: block; }
+  .tag { font: 600 12px ui-monospace, Menlo, monospace; background: #2b2f38; color: #fff; padding: 2px 8px; border-radius: 10px; }
+  .pick { display: flex; gap: 4px; }
+  #walkwrap { padding: 0 16px 16px; display: flex; justify-content: center; }
+  #walkway { border: 1px solid #d0d3da; border-radius: 8px; max-width: 100%; }
+  h2 { margin: 0; padding: 0 16px; font-size: 14px; text-align: center; }
+  #expr { padding: 8px 16px 16px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  body.zoom header, body.zoom #cards, body.zoom #walkwrap { display: none; }
+  #gallery { padding: 8px 16px 16px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .gcard { background: #fff; border: 1px solid #d0d3da; border-radius: 8px; padding: 6px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  #state-label { font: 12px ui-monospace, Menlo, monospace; color: #555; }
+</style>
+</head>
+<body>
+<header>
+  <label>State <select id="state"></select></label>
+  <label>Scale <select id="scale"><option>3</option><option selected>4</option><option>6</option></select>x</label>
+  <button id="random">Random looks</button>
+  <span id="state-label"></span>
+  <span id="check" class="fail">self-check: running</span>
+</header>
+<main id="cards"></main>
+<div id="walkwrap"><canvas id="walkway"></canvas></div>
+<h2>Expressions (frame 0 of every state)</h2>
+<div id="expr"></div>
+<h2>Outfit gallery</h2>
+<div id="gallery"></div>
+
+<script src="sprites.js"></script>
+<script>
+// SELFCHECK-START
+function selfCheck(d) {
+  const res = { pass: 0, fail: 0, log: [] };
+  const ok = (cond, msg) => { if (cond) res.pass++; else { res.fail++; res.log.push('FAIL ' + msg); } };
+  const STATES = ['idle', 'walk', 'working', 'question', 'done', 'sleep', 'goodbye', 'dragged', 'permission', 'error'];
+  const COUNTS = { idle: [4, 8], walk: [4, 4], working: [4, 6], question: [4, 6], done: [6, 6], sleep: [4, 6], goodbye: [4, 6], dragged: [2, 2], permission: [4, 4], error: [4, 4] };
+  const KEYS = ['outline', 'body', 'shade', 'highlight', 'eye', 'white', 'cheek', 'accent', 'accentShade', 'fx', 'fx2',
+    'pupil', 'mouthDark', 'tongue', 'teeth', 'propGreen', 'propBlue', 'propRed', 'propOrange', 'propPurple', 'propLight', 'propYellow'];
+  const lum = h => { const c = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(v => v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4); return .2126 * c[0] + .7152 * c[1] + .0722 * c[2]; };
+  const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
+  const rowsOk = (rows, where) => {
+    ok(Array.isArray(rows) && rows.length === 32, where + ' has 32 rows');
+    (rows || []).forEach((r, i) => {
+      ok(typeof r === 'string' && r.length === 32, where + ' row ' + i + ' has 32 chars');
+      ok(typeof r === 'string' && [...r].every(c => c in d.legend), where + ' row ' + i + ' chars all in legend');
+    });
+  };
+  ok(d.version === 1, 'version is 1');
+  const OFFACE = new Set(['P', 'W']); // eye and pupil chars in body rows
+  ok(d.grid && d.grid.w === 32 && d.grid.h === 32, 'grid is 32x32');
+  ok(d.fps > 0, 'fps set');
+  const pnames = Object.keys(d.palettes), cnames = Object.keys(d.bases);
+  ok(cnames.length === 1 && cnames[0] === 'clawd', 'bases is exactly clawd (got ' + cnames.join() + ')');
+  ok(pnames.length >= 10, 'at least 10 palettes');
+  ok(Object.keys(d.outfits).length >= 14, 'at least 14 outfits');
+  ['claude', 'mint', 'sky', 'grape', 'lemon', 'charcoal', 'rose', 'teal', 'orange-sunset', 'forest'].forEach(n => ok(n in d.palettes, 'palette ' + n + ' exists'));
+  ['cap', 'headphones', 'scarf', 'glasses', 'wizard-hat', 'hoodie-hood', 'bow', 'crown', 'party-hat', 'beanie', 'cowboy-hat', 'bandana', 'bowtie', 'propeller-cap'].forEach(n => ok(n in d.outfits, 'outfit ' + n + ' exists'));
+  Object.entries(d.legend).forEach(([k, v]) => {
+    ok(v === null || KEYS.includes(v), 'legend ' + k + ' maps to a palette key');
+    if (v) pnames.forEach(p => ok(v in d.palettes[p], 'palette ' + p + ' defines legend key ' + v));
+  });
+  ok(KEYS.every(k => Object.values(d.legend).includes(k)), 'every palette key is used by the legend');
+  pnames.forEach(p => {
+    KEYS.forEach(k => ok(/^#[0-9a-fA-F]{6}$/.test(d.palettes[p][k] || ''), 'palette ' + p + '.' + k + ' is a hex colour'));
+    const P = d.palettes[p];
+    ok(contrast(P.eye, P.body) >= 4, 'palette ' + p + ' eye/body contrast >= 4 (got ' + contrast(P.eye, P.body).toFixed(1) + ')');
+    ok(contrast(P.outline, P.body) >= 2, 'palette ' + p + ' outline/body contrast >= 2');
+    const cc = (a, b, min, name) => ok(contrast(P[a], P[b]) >= min, 'palette ' + p + ' ' + name + ' contrast >= ' + min + ' (got ' + contrast(P[a], P[b]).toFixed(1) + ')');
+    cc('pupil', 'white', 7, 'pupil/white'); cc('pupil', 'body', 4, 'pupil/body'); cc('mouthDark', 'body', 3.5, 'mouthDark/body');
+    cc('mouthDark', 'teeth', 4, 'mouthDark/teeth'); cc('tongue', 'mouthDark', 2, 'tongue/mouthDark');
+    cc('outline', 'white', 4, 'outline/white (brows, bubble text)');
+  });
+  cnames.forEach(c => {
+    STATES.forEach(s => {
+      const st = d.bases[c].states[s];
+      ok(!!st, c + ' has state ' + s);
+      if (!st) return;
+      ok(st.frames.length >= COUNTS[s][0] && st.frames.length <= COUNTS[s][1], c + '.' + s + ' frame count ' + st.frames.length);
+      ok(typeof st.loop === 'boolean', c + '.' + s + ' loop is boolean');
+      if (s === 'done' || s === 'goodbye') ok(st.loop === false, c + '.' + s + ' loop is false');
+      else ok(st.loop === true, c + '.' + s + ' loop is true');
+      st.frames.forEach((f, i) => {
+        rowsOk(f.rows, c + '.' + s + '[' + i + ']');
+        if ('fx' in f) rowsOk(f.fx, c + '.' + s + '[' + i + '].fx');
+        Object.entries(d.outfits).forEach(([n, o]) => {
+          if (n === 'glasses' || !Array.isArray(f.rows) || !Array.isArray(o.rows)) return;
+          let hit = 0;
+          o.rows.forEach((r, y) => [...r].forEach((ch, x) => { if (ch !== '.' && OFFACE.has(f.rows[y + f.head[1]]?.[x + f.head[0]])) hit++; }));
+          ok(hit === 0, 'outfit ' + n + ' covers eye pixels in ' + s + '[' + i + ']');
+        });
+        ok(Array.isArray(f.head) && f.head.length === 2 && f.head.every(Number.isInteger), c + '.' + s + '[' + i + '] head is [int,int]');
+      });
+    });
+    ok(d.bases[c].states.idle.frames[0].head.join() === '0,0', c + ' idle frame 0 head is [0,0]');
+    ok(Object.keys(d.bases[c].states).length === STATES.length, c + ' has exactly ' + STATES.length + ' states');
+  });
+  Object.entries(d.outfits).forEach(([n, o]) => {
+    rowsOk(o.rows, 'outfit ' + n);
+    ok(typeof o.label === 'string', 'outfit ' + n + ' has label');
+    ok(!('fits' in o), 'outfit ' + n + ' has no fits key');
+  });
+  return res;
+}
+// SELFCHECK-END
+
+(async function main() {
+  let D;
+  try { const r = await fetch('sprites.json'); if (!r.ok) throw new Error(r.status); D = await r.json(); }
+  catch (e) { console.warn('fetch failed, using sprites.js fallback:', e.message); D = window.SPRITES; }
+  const chk = document.getElementById('check');
+  if (!D) { chk.textContent = 'self-check: no data'; return; }
+  const res = selfCheck(D);
+  chk.textContent = 'self-check: ' + res.pass + ' PASS / ' + res.fail + ' FAIL';
+  chk.className = res.fail ? 'fail' : 'pass';
+  console.log('self-check', res.pass, 'PASS', res.fail, 'FAIL');
+  res.log.forEach(l => console.error(l));
+
+  const $ = id => document.getElementById(id);
+  const C = 'clawd', palNames = Object.keys(D.palettes), outNames = Object.keys(D.outfits);
+  const STATES = Object.keys(D.bases[C].states);
+  const NAMES = ['api-gateway', 'web-app', 'docs-site', 'data-jobs'];
+  const looks = [['claude', 'cap'], ['teal', 'headphones'], ['grape', 'wizard-hat'], ['orange-sunset', 'propeller-cap']].map(([palette, outfit]) => ({ palette, outfit }));
+  const fill = (sel, items) => { sel.innerHTML = ''; items.forEach(([v, t]) => sel.add(new Option(t, v))); };
+  fill($('state'), [['auto', 'auto-cycle all'], ...STATES.map(s => [s, s])]);
+
+  const cards = $('cards');
+  const cells = looks.map((look, i) => {
+    const card = document.createElement('div'); card.className = 'card';
+    const stage = document.createElement('div'); stage.className = 'stage';
+    const cv = document.createElement('canvas'); stage.appendChild(cv);
+    const pick = document.createElement('div'); pick.className = 'pick';
+    const ps = document.createElement('select'), os = document.createElement('select');
+    fill(ps, palNames.map(p => [p, p]));
+    pick.append(ps, os);
+    const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = NAMES[i];
+    card.append(stage, pick, tag); cards.appendChild(card);
+    ps.onchange = () => { look.palette = ps.value; };
+    os.onchange = () => { look.outfit = os.value; };
+    return { cv, ps, os, look };
+  });
+  function refreshSelects() {
+    cells.forEach(({ ps, os, look }) => {
+      fill(os, [['none', 'no outfit'], ...outNames.map(o => [o, D.outfits[o].label])]);
+      ps.value = look.palette; os.value = look.outfit;
+    });
+  }
+  function resize() {
+    const s = +$('scale').value;
+    cells.forEach(({ cv }) => { cv.width = 32 * s; cv.height = 32 * s; cv.style.width = cv.width + 'px'; cv.style.height = cv.height + 'px'; });
+    const w = $('walkway'); w.width = 120 * s; w.height = 34 * s; w.style.width = w.width + 'px'; w.style.height = w.height + 'px';
+  }
+  $('scale').onchange = resize;
+  $('random').onclick = () => {
+    const pick = a => a[Math.floor(Math.random() * a.length)];
+    cells.forEach(({ look }) => {
+      look.palette = pick(palNames);
+      look.outfit = Math.random() < .15 ? 'none' : pick(outNames);
+    });
+    refreshSelects();
+  };
+
+  const colour = (pal, ch) => { const k = D.legend[ch]; return k ? D.palettes[pal][k] : null; };
+  function paint(ctx, rows, pal, ox, oy, s, flip) {
+    rows.forEach((r, y) => { for (let x = 0; x < 32; x++) {
+      const c = colour(pal, r[x]); if (!c) continue;
+      ctx.fillStyle = c;
+      const px = (flip ? 31 - x : x) + ox;
+      ctx.fillRect(px * s, (y + oy) * s, s, s);
+    } });
+  }
+  function draw(ctx, state, fi, look, s, ox, oy, flip) {
+    const f = D.bases[C].states[state].frames[fi];
+    paint(ctx, f.rows, look.palette, ox, oy, s, flip);
+    if (look.outfit !== 'none') paint(ctx, D.outfits[look.outfit].rows, look.palette, ox + (flip ? -f.head[0] : f.head[0]), oy + f.head[1], s, flip);
+    if (f.fx) paint(ctx, f.fx, look.palette, ox, oy, s, flip);
+  }
+  // frame index for a state at tick t; non-looping states hold the last frame, then replay
+  function frameAt(st, t) { const n = st.frames.length; return st.loop ? t % n : Math.min(t % (n + 4), n - 1); }
+
+  let startT = performance.now();
+  function tick(now) {
+    // rAF timestamps can precede startT on the first frame; a negative t gives frames[-1]
+    const t = Math.max(0, Math.floor((now - startT) * D.fps / 1000)), s = +$('scale').value;
+    let state = $('state').value, st, lt = t;
+    if (state === 'auto') {
+      const dwell = n => Math.max(n * 2 + 4, 16);
+      let acc = 0, total = STATES.reduce((a, k) => a + dwell(D.bases[C].states[k].frames.length), 0);
+      lt = t % total;
+      for (const k of STATES) { const d = dwell(D.bases[C].states[k].frames.length); if (lt < acc + d) { state = k; lt -= acc; break; } acc += d; }
+    }
+    st = D.bases[C].states[state];
+    $('state-label').textContent = state + (st.loop ? '' : ' (once)');
+    const fi = frameAt(st, lt);
+    cells.forEach(({ cv, look }) => {
+      const ctx = cv.getContext('2d'); ctx.clearRect(0, 0, cv.width, cv.height);
+      draw(ctx, state, fi, look, s, 0, 0, false);
+    });
+    // walkway: mascot 0 walks right, turns, walks left (mirrored)
+    const w = $('walkway'), wc = w.getContext('2d'); wc.clearRect(0, 0, w.width, w.height);
+    const span = 120 - 32, period = span * 2, pos = Math.floor(t * 1.0) % period;
+    const right = pos < span, x = right ? pos : period - pos;
+    const walk = D.bases[C].states.walk;
+    draw(wc, 'walk', t % walk.frames.length, cells[0].look, s, x, 1, !right);
+    requestAnimationFrame(tick);
+  }
+  const gal = $('gallery');
+  outNames.forEach((o, i) => {
+    const card = document.createElement('div'); card.className = 'gcard';
+    const stage = document.createElement('div'); stage.className = 'stage';
+    const cv = document.createElement('canvas'); cv.width = cv.height = 96; cv.style.width = cv.style.height = '96px';
+    stage.appendChild(cv);
+    const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = D.outfits[o].label;
+    card.append(stage, tag); gal.appendChild(card);
+    draw(cv.getContext('2d'), 'idle', 0, { palette: palNames[i % palNames.length], outfit: o }, 3, 0, 0, false);
+  });
+  const ex = $('expr');
+  STATES.forEach(k => {
+    const card = document.createElement('div'); card.className = 'gcard';
+    const stage = document.createElement('div'); stage.className = 'stage';
+    const cv = document.createElement('canvas'); cv.width = cv.height = 96; cv.style.width = cv.style.height = '96px';
+    stage.appendChild(cv);
+    const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = k;
+    card.append(stage, tag); ex.appendChild(card);
+    draw(cv.getContext('2d'), k, 0, { palette: 'claude', outfit: 'none' }, 3, 0, 0, false);
+  });
+  const q = new URLSearchParams(location.search);
+  if (q.get('view') === 'expr') document.body.classList.add('zoom');
+  if (q.get('state')) $('state').value = q.get('state');
+  refreshSelects(); resize();
+  tick(performance.now());
+})();
+</script>
+</body>
+</html>

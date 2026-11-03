@@ -1,0 +1,11 @@
+.build/
+build/
+node_modules/
+vscode-ext/out/
+*.vsix
+.DS_Store
+.claude/
+.playwright-mcp/
+docs/learnings/
+docs/planning/
+docs/pm/

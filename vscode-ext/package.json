@@ -1,0 +1,41 @@
+{
+  "name": "buddy-companion",
+  "displayName": "Buddy Companion",
+  "description": "Lets the Buddy macOS app type into and focus integrated terminals.",
+  "version": "0.1.1",
+  "publisher": "tiagosantos-local",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://localhost/buddy-companion.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "buddy.showLog",
+        "title": "Buddy: Show Log"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "test": "npm run build && node --test out/test/*.test.js",
+    "package": "npm run build && vsce package --allow-missing-repository --skip-license"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^4.1.0",
+    "typescript": "^5.4.0"
+  }
+}
