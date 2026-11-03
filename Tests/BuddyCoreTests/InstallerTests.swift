@@ -66,6 +66,44 @@ import Testing
 }
 
 @Suite struct InstallerHardeningTests {
+    func tempDir() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("buddy-inst-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test func symlinkedSettingsStaysALink() throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let target = dir.appendingPathComponent("dotfiles-settings.json")
+        try Data(#"{"model":"opus"}"#.utf8).write(to: target)
+        let link = dir.appendingPathComponent("settings.json")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        _ = try HookInstaller.apply(install: true, settingsURL: link, hookPath: "/x/Contents/MacOS/buddy-hook")
+        let attrs = try FileManager.default.attributesOfItem(atPath: link.path)
+        #expect(attrs[.type] as? FileAttributeType == .typeSymbolicLink)
+        #expect(try obj(Data(contentsOf: target))["hooks"] != nil)
+    }
+
+    @Test func missingClaudeFolderIsCreated() throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent(".claude/settings.json")
+        let r = try HookInstaller.apply(install: true, settingsURL: url, hookPath: "/x/Contents/MacOS/buddy-hook")
+        #expect(r == .written(backup: nil))
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test func mixedGroupUninstallKeepsTheUserHandler() throws {
+        let cmd = HookInstaller.command(for: "/x/Contents/MacOS/buddy-hook")
+        let settings: [String: Any] = ["hooks": ["Stop": [["hooks": [["type": "command", "command": "say done"], ["type": "command", "command": cmd]]]]]]
+        let data = try JSONSerialization.data(withJSONObject: settings)
+        let out = try obj(HookInstaller.uninstall(settings: data, hookPath: "/x/Contents/MacOS/buddy-hook"))
+        let stop = try #require((out["hooks"] as? [String: Any])?["Stop"] as? [[String: Any]])
+        let handlers = try #require(stop.first?["hooks"] as? [[String: Any]])
+        #expect(stop.count == 1 && handlers.count == 1)
+        #expect(handlers.first?["command"] as? String == "say done")
+    }
 
     @Test func pathAlwaysQuoted() throws { // L3
         let path = "/Users/o'neil/Apps/Buddy.app/Contents/MacOS/buddy-hook"

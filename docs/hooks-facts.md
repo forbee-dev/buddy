@@ -215,7 +215,7 @@ Permissions
 - Also send `permission_suggestions` to the app so it can offer "always allow".
 
 Questions
-- Use `PreToolUse` with matcher `AskUserQuestion`. Return `allow` + `updatedInput` (original `questions` + `answers`). This is DOCS-only: do a quick manual interactive test before building. Fallback: `deny` with the answer in `permissionDecisionReason`.
+- Use `PreToolUse` with matcher `AskUserQuestion`. Return `allow` + `updatedInput` (original `questions` + `answers`). This is DOCS-only: do a quick manual interactive test before building. Fallback: `deny` with the answer in `permissionDecisionReason`. Superseded: see W2 → Decision for Buddy.
 - Unlike PermissionRequest, the terminal dialog is probably NOT shown while this hook waits (PreToolUse runs before the tool). UNTESTED. If true, the user cannot answer in the terminal while Buddy waits. Add a "skip, ask in terminal" button that exits 0 with no output.
 
 Next prompt
@@ -387,3 +387,138 @@ Register hooks: `PreToolUse`, `PostToolUse`, `PermissionRequest`, `SubagentStart
 (c) Attribute permission cards: put `agent_id` and `agent_type` from `PermissionRequest` into the card (title "<agent_type> subagent wants to run Bash"). Look up the row by `agent_id`. Answer with the same JSON as for a top-level request.
 
 Test files (scratch, not in the app): `scratchpad/w-sub/` (`log.py`, `ps.py`, `perm.py`, `settings*.json`, `ev1-3.jsonl`).
+
+## Edge cases and usage data
+
+Date: 2026-11-03. Claude Code 2.1.317. Tests: `claude -p` and `expect` on a pty, with a logging hook on all events (scratch: `scratchpad/w-edge/`: `log.py`, `settings.json`, `run.exp`, `events.jsonl`).
+Labels: **TESTED** / **DOCS** / **UNTESTED**. Test note: the user config sets a default agent, so main events carry `agent_type:"forgebee:orchestrator"`. Interactive tests ran in a trusted dir (the trust dialog cannot be skipped on a pty). Interactive runs used Ctrl-C to quit.
+
+### E1. Background shell started INSIDE a subagent
+
+Verdict: the parent's `background_tasks` DOES list it. The shell is NOT tied to the subagent in that list. TESTED (interactive pty, 1 run; `-p`, 2 runs).
+
+Timeline (interactive, t in seconds):
+```
+386.2 SubagentStart  ade5d743e30508ec2
+387.6 Stop (parent)  background_tasks=[subagent ade5d7...]
+388.6 PreToolUse  Bash   agent_id=ade5d7...  tool_input.run_in_background=true
+391.4 PostToolUse Bash   agent_id=ade5d7...  tool_response.backgroundTaskId="bd0pozgot"
+392.7 SubagentStop ade5d7...   background_tasks=[subagent ade5d7 (running), shell bd0pozgot (running)]
+392.9 UserPromptSubmit (parent)  <task-notification> task-id=ade5d7... status=completed
+      summary: Agent "..." is waiting on its own background work
+395.0 Stop (parent)  background_tasks=[shell bd0pozgot]      subagent entry GONE, shell stays
+~402  shell exits (sleep 15). No hook event for it. No UserPromptSubmit with task-id=bd0pozgot.
+406.5 SubagentStart  ade5d7...   SAME agent_id again (the subagent resumes)
+410.3 SubagentStop   ade5d7...   background_tasks=[subagent ade5d7 (running)]
+410.5 UserPromptSubmit (parent)  <task-notification> task-id=ade5d7... status=completed
+      summary: Agent "..." finished   (no <tool-use-id> element this time)
+412.5 Stop (parent)  background_tasks=[]
+```
+Facts:
+- **Parent `Stop.background_tasks`**: lists the subagent's shell (`type:"shell"`, same entry format as for a parent shell). There is no owner field. TESTED.
+- **Subagent's own events**: `PreToolUse`/`PostToolUse` Bash carry `agent_id`. `PostToolUse.tool_response.backgroundTaskId` gives the shell id. This is the ONLY owner link. `SubagentStop.background_tasks` also lists the shell. TESTED.
+- **Completion**: the `<task-notification>` for the shell goes to the OWNING SUBAGENT, not to the parent. The parent never sees a `UserPromptSubmit` for the shell id. The subagent wakes (a second `SubagentStart` with the same `agent_id`), reads the result, then stops again. TESTED. The wake-up used a hidden message path (a `SendMessage` PreToolUse by an agent id that had no `SubagentStart`; its `tool_input` keys: `to`, `recipient`, `recipient_kind`, `summary`, `message`, `content`, `type`). Do not rely on it.
+- **`SubagentStop` is not final** when a shell of that subagent is still in `background_tasks`. The parent task-notification then says `is waiting on its own background work`. The same `agent_id` can start and stop MORE THAN ONCE. TESTED.
+- Two stops with an unknown `agent_id` appeared (internal agents, no `SubagentStart`). TESTED: ignore them, as section Q1 says.
+- In `-p` the process exits when the parent has no running subagent, even with a shell still in `background_tasks` (the shell was never reported as finished; `SessionEnd` came 6 s after `Stop`). TESTED. So in `-p` there is no completion signal.
+- Pid check for the subagent's shell: UNTESTED. Expect a child of `CLAUDE_PID` as for parent shells.
+
+Signal for Buddy: key a shell row by `backgroundTaskId`. Owner = `agent_id` of the `PostToolUse` Bash. Shell state = "running" while the id is in the NEWEST `background_tasks` of ANY `Stop` or `SubagentStop` of the session (parent `Stop` is the truth for all shells). Shell = finished when an id from a previous list is missing from a later list (`Stop` or `SubagentStop`). Never use "owner SubagentStop" as a finish signal. A subagent row is "done" only when its `agent_id` is gone from the parent `Stop.background_tasks` AND no shell it owns is in the list. If `SubagentStart` arrives again with a known `agent_id`, reopen the row.
+
+### E2. Killed subagent (`TaskStop`)
+
+Verdict: NO `SubagentStop` fires. TESTED (`-p`: background subagent `sleep 90`, parent called `TaskStop` after about 10 s).
+
+Events, in order:
+```
+PreToolUse  TaskStop   tool_input={"task_id":"a2903d4fd9355b8a0"}          (parent, no agent_id)
+PostToolUse TaskStop   tool_input={"task_id":"..."}
+                       tool_response={"message":"Successfully stopped task: a2903d4fd9355b8a0 (Sleep 90 then reply)",
+                                      "task_id":"a2903d4fd9355b8a0","task_type":"local_agent","command":"Sleep 90 then reply"}
+UserPromptSubmit (parent)  <task-notification><task-id>a2903...</task-id><tool-use-id>toolu_...</tool-use-id>
+                       <output-file>...</output-file><status>killed</status>
+                       <summary>Agent "Sleep 90 then reply" was stopped by Claude</summary><note>...</note>
+Stop (parent)  background_tasks=[]       (the subagent's own bg shell is gone too)
+```
+- `tool_response` keys: `message`, `task_id`, `task_type`, `command`. For a subagent `task_type="local_agent"`. For a shell, `task_type="local_bash"` (section Q4). `command` holds the description for a subagent.
+- `PostToolUse` of TaskStop: `tool_input.task_id` = `agent_id`. No hook event for the kill reaches the subagent (it gets no `SubagentStop`). Its row would stay "running" forever in Buddy.
+- Done vs stopped: `<status>` in the synthetic `UserPromptSubmit`: `completed` (done) or `killed` (stopped). TESTED. `failed` or other values: UNTESTED.
+- On disk (TESTED, n=1 each): `<session>/subagents/agent-<id>.meta.json` has `"finished":true` for the finished subagent. The key is ABSENT for the killed one. The same file has `toolUseId` (the parent Agent call id), `agentType`, `description`, `spawnDepth`. Read it as a fallback. The key name may change.
+- A user stop (Esc, `/stop`, close of the background task panel): UNTESTED. TaskStop by a user may not fire `PostToolUse(TaskStop)` at all. Use the `<task-notification>` status and the missing id in `background_tasks`.
+
+Signal for Buddy: subagent "stopped" = (`PostToolUse` TaskStop with `tool_input.task_id` = row id) OR (`<task-notification>` with `<status>killed</status>`). Subagent "done" = `SubagentStop` (and `<status>completed</status>`). Safety net for a row with no `SubagentStop`: parent `Stop` whose `background_tasks` lacks the id, then show "ended".
+
+### E3. `Notification` inside a subagent
+
+Verdict: a subagent permission prompt fires NO `Notification` in our tests. A main-session prompt DOES. TESTED (pty, `--permission-mode default`).
+- Main session: `PermissionRequest` at t, `Notification` at t + 6 s. Keys: `agent_type`, `cwd`, `hook_event_name`, `message` (`"Claude needs your permission"`), `notification_type` (`"permission_prompt"`), `prompt_id`, `scratchpad_dir`, `session_id`, `transcript_path`. No `agent_id`, no `tool_name`, no `title` in this run.
+- Subagent (2 runs): `PreToolUse` Bash (with `agent_id`), `PermissionRequest` (with `agent_id`), then no `Notification` in the next 25 to 35 s. Both runs used a background subagent (the model/harness started it in the background). A foreground subagent: UNTESTED.
+- `idle_prompt`: UNTESTED. DOCS: fires about 60 s after Claude finishes, only when the user did not type and no background agent runs. Payload has no `agent_id` field in the DOCS example.
+- DOCS list of `notification_type` values: `permission_prompt`, `idle_prompt`, `auth_success`, `elicitation_dialog`, `elicitation_url_dialog`, `elicitation_complete`, `elicitation_response`, `agent_needs_input`, `agent_completed`, `quota_auto_resume_fired`, `quota_auto_resume_stale`, `quota_auto_resume_disabled`, `plugin_notification`. Only `permission_prompt` is TESTED.
+- Common fields: `prompt_id` and `scratchpad_dir` exist on nearly every event in 2.1.317 (new keys vs the older sections). `PermissionRequest` has `effort`.
+
+Signal for Buddy: do NOT use `Notification` to attribute or detect subagent prompts. Use `PermissionRequest` (`agent_id` + `agent_type`). Treat `Notification` as "main session needs attention" only, and drop it when a `PermissionRequest` was already shown for the same session in the last 10 s.
+
+### E4. Token usage and cost
+
+Verdict: usage is in the transcript, not in hooks. TESTED on this scratch session's transcripts only (field NAMES and numbers, no content).
+
+**Where**
+- Parent transcript: `transcript_path` (hook field, all events). Lines are JSON objects with `type`. Assistant lines: `type:"assistant"`, `message.id` (`msg_...`), `message.model`, `message.usage`, `message.stop_reason`, `requestId`, `uuid`, `isSidechain`, `timestamp`, `sessionId`.
+- `message.usage` keys: `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens` (all int), plus `output_tokens_details.thinking_tokens`, `cache_creation.ephemeral_5m_input_tokens`, `cache_creation.ephemeral_1h_input_tokens`, `server_tool_use.{web_search_requests,web_fetch_requests}`, `service_tier`, `inference_geo`, `speed`, `iterations[]`, `fallback_credit`. Thinking tokens are INSIDE `output_tokens`.
+- Model id: `message.model` on each assistant line. Seen: `claude-opus-5-5`, `claude-haiku-5-5`. Also `requestedModel` on the line, and `model` on the `SessionStart` hook payload (TESTED; absent on other events). The Agent `PostToolUse.tool_response` has `resolvedModel` (async launch) and, for foreground, `totalTokens`, `totalDurationMs`, `totalToolUseCount`.
+- Subagent transcripts: SEPARATE files: `<project dir>/<session_id>/subagents/agent-<agent_id>.jsonl` (+ `agent-<agent_id>.meta.json`). Same line format, `isSidechain:true`, has `agentId`. The `SubagentStop` hook gives `agent_transcript_path` (TESTED). A running subagent: path is derivable from `transcript_path` (strip `.jsonl`, add `/subagents/agent-<agent_id>.jsonl`). TESTED.
+- Hooks: no `usage`, `cost` or token field on any hook payload. `Stop` keys (TESTED): `agent_type`, `background_tasks`, `cwd`, `effort`, `hook_event_name`, `last_assistant_message`, `permission_mode`, `prompt_id`, `scratchpad_dir`, `session_crons`, `session_id`, `stop_hook_active`, `transcript_path`. Nothing usable for tokens. `PostToolUse` has `duration_ms`.
+- `cost-state` line: ONE line `type:"cost-state"` appended at the END of the session (line 96 of 96, in `-p`). Keys: `totalCostUSD`, `modelUsage.<model>.{inputTokens,outputTokens,thinkingTokens,cacheReadInputTokens,cacheCreationInputTokens,cacheCreationEphemeral5mInputTokens,cacheCreationEphemeral1hInputTokens,webSearchRequests,costUSD}`, `hasUnknownModelCost`, `totalAPIDuration`, `totalDuration`, `totalToolDuration`, `totalLinesAdded`, `totalLinesRemoved`, `startTime`. It includes subagents. It was NOT seen in interactive sessions that were killed with Ctrl-C (those left no main `<session>.jsonl` at all in our test, only a `subagents/` dir; cause UNTESTED). Use it as a cross-check at `SessionEnd`, never as the live source.
+
+**Dedupe is required.** One API response (`message.id`) is written as SEVERAL lines, one per content block (`thinking`, `text`, `tool_use`). Each line repeats the same `usage`. Example: 9 assistant lines held 4 unique `message.id`. Summing lines gave about 2x the real tokens. All repeats had identical `usage` values; `requestId` was 1:1 with `message.id`.
+
+**Check (TESTED)**: sum over unique `message.id` of parent + subagent files equals `cost-state.modelUsage` exactly, for both scratch sessions (input 7+4=11, output 808+121=929, cache_creation 213675+84340=298015, cache_read 221209+75683=296892; second session also matched). Cache-creation tokens in `usage.cache_creation_input_tokens` already equal the 5m + 1h split.
+
+**Algorithm (incremental)**
+1. State per transcript file: `offset` (bytes), `seen` = map `message.id` -> last counted usage tuple. Per session: totals per model.
+2. On every `Stop`, `SubagentStop`, `PostToolUse`(Agent) and `SessionEnd`: for the parent file and every known subagent file (`agent_transcript_path`, or derived path for running subagents, or a directory scan of `<session_id>/subagents/*.jsonl`), open the file, seek to `offset`, read to EOF.
+3. Cut the buffer at the LAST `\n`. Keep the tail (partial line) for the next read: set `offset` = start of that tail. Never parse a partial line.
+4. For each full line: skip it unless `type == "assistant"` and `message.usage` exists. Skip `message.model` values that start with `<` (synthetic, UNTESTED, defensive).
+5. Dedupe by `message.id`. If the id is new: add the four token fields to `totals[message.model]`. If the id was seen: add only the POSITIVE difference per field against the stored tuple (this handles a streaming line written with a smaller `output_tokens` first; not seen in our tests, kept as a guard). Store the max per field.
+6. If the file size is smaller than `offset` (rotation or rewrite): reset `offset` and `seen` for that file, and recount the session from zero.
+7. Session total = sum over parent + all subagent files. Cost = per model: tokens x price from Buddy's JSON. Price cache creation by 5m/1h split if the JSON has both rates; else use `cache_creation_input_tokens` with the 5m rate (1h costs more, so this under-counts a little).
+8. At `SessionEnd`, if a `cost-state` line exists, compare `totalCostUSD` and show a warning on a mismatch above 2 percent. Do not overwrite the sum.
+9. Missing transcript file: show "usage n/a". Do not fail.
+
+Line types to skip (TESTED, all appear in the parent file, none carry billable usage): `attachment`, `api-request`, `api-request-blob`, `api-request-shape`, `agent-setting`, `session-owner`, `atis-latch`, `last-prompt`, `queue-operation`, `user`, `system` (`subtype:"stop_hook_summary"`), `tools-used`, `cost-state` (cross-check only). `user` lines hold tool results, no usage. Subagent files hold `user`, `assistant`, `attachment`, `api-request*`.
+Caveat: `/compact` and `/resume` copies: UNTESTED. A resumed session may copy old assistant lines into a new file with the same `message.id`. Dedupe across the session's files by `message.id` (keep one global `seen` per `session_id` chain) to be safe.
+
+### E5. Detect disabled hooks from outside
+
+Verdict: DOCS. UNTESTED here (we did not set the keys).
+- `disableAllHooks` (bool): "Only `disableAllHooks` set at the managed settings level can disable managed hooks." It is a normal key: a project `false` overrides a user `true`, and `--settings '{"disableAllHooks":true}'` beats project and local files. Claude Code uses the value left after precedence.
+- `allowManagedHooksOnly` (bool, managed settings only): "user, project, local, and plugin hooks are blocked". Exempt: hooks from plugins force-enabled in managed `enabledPlugins`. Buddy's hooks live in the user file, so they are blocked.
+- Files to read, lowest to highest precedence: `~/.claude/settings.json` (user, or `$CLAUDE_CONFIG_DIR/settings.json`), `<project>/.claude/settings.json`, `<project>/.claude/settings.local.json`, then managed. Managed (DOCS, from the managed-settings page; paths not re-verified this session, absent on this Mac): macOS `/Library/Application Support/ClaudeCode/managed-settings.json` (+ `managed-settings.d/*.json` drop-ins), Linux and WSL `/etc/claude-code/managed-settings.json`, Windows under `C:\Program Files\ClaudeCode\`. MDM (macOS plist domain `com.anthropic.claudecode`) and server-managed settings (claude.ai console, not a file) also exist. Check `/status` "Setting sources" in-app to name the active managed source.
+- `--settings <file|json>` and `ConfigChange` hook: a session can have extra settings Buddy cannot see from disk. File reading gives only "likely disabled".
+- Reliable runtime proof (TESTED idea, the fact that hooks fire is TESTED): a session that is alive but sent no `SessionStart`. Buddy can see Claude processes with `ps` (`claude` argv) and compare to sessions it knows from hooks.
+
+Signal for Buddy (Diagnostics): (1) merge the files above in precedence order: managed > project local > project > user. Read `disableAllHooks` (last writer wins per the order; a managed `true` always wins) and managed `allowManagedHooksOnly`. Report "hooks disabled by <file>" with the winning file. (2) Check that the Buddy hook entries still exist in the user file. (3) Heartbeat: if a `claude` process runs with no hook event within 30 s of its start, show "Claude is running but sends no hooks (disableAllHooks or managed policy?)". Treat file reading as a hint, the heartbeat as proof.
+
+### E6. SSH (remote Claude Code)
+
+Verdict: DOCS only. We did not set up SSH.
+- Hooks run where Claude Code runs: on the REMOTE host, as the remote user, with the remote environment and cwd. Local Buddy cannot read the remote transcript or `/proc` directly. The hook must send the data out. (DOCS: hooks run in the terminal and IDE sessions; the `CLAUDE_CODE_REMOTE=true` variable is for cloud web sessions, not set for plain SSH, so do not use it for SSH.)
+- Unix socket forward (DOCS, OpenSSH `ssh(1)` and `sshd_config(5)`): `ssh -R /remote/path/buddy.sock:/local/path/buddy.sock host`. The remote `sshd` listens on `/remote/path/buddy.sock`. A connect from a hook (`socat - UNIX-CONNECT:/remote/path/buddy.sock`, `nc -U`, or `curl --unix-socket`) is relayed to the local socket. Needs OpenSSH 6.7 or later on both ends and `AllowStreamLocalForwarding` not `no` on the server (default `yes`).
+- Stale socket: after a dropped connection the remote socket file stays and the next `-R` fails ("remote port forwarding failed for listen path"). Fix on the SERVER: `StreamLocalBindUnlink yes` in `sshd_config` (default `no`). The client option of the same name in `ssh_config` covers client-side `-L` sockets. Also set `-o ExitOnForwardFailure=yes` so a failed forward is not silent. Alternative without server config: unique socket path per connection, for example `/tmp/buddy-$USER-<random>.sock`, and a cleanup step.
+- Socket path limit: about 104 bytes on macOS, 108 on Linux. Keep remote and local paths short. Permissions: the remote socket is created with the remote user's umask. Set `StreamLocalBindMask` (sshd) if needed. Anyone who can write to the remote socket can inject events into Buddy: Buddy must validate every message and bind the local socket in a 0700 directory.
+- Hook-side routing: the hook needs to know the remote socket path. Put it in the remote `~/.claude/settings.json` hook command (default path) or in an env var such as `BUDDY_SOCK` exported by `RemoteCommand`/`SetEnv` (needs `AcceptEnv` on the server, so a fixed default path is simpler).
+- SSH detection in a hook (DOCS, sshd behaviour; the hook inherits Claude's env, TESTED for `CLAUDE_PID`): `SSH_CONNECTION` ("client_ip client_port server_ip server_port"), `SSH_CLIENT` (client_ip client_port server_port), `SSH_TTY` (set only for sessions with a pty; absent for `ssh host cmd` without `-t`). `SSH_AUTH_SOCK` may be a forwarded agent. Inside `tmux` or `screen` the variables can be stale from the first attach. Cross-check with the process ancestry (`sshd` parent) when it matters. Local-only fallback check: absence of `SSH_CONNECTION` means local.
+
+### Design impact for Buddy
+
+1. **Shell inside a subagent**: row key = `PostToolUse` Bash `tool_response.backgroundTaskId`, owner = that event's `agent_id`. Running = id present in the newest `background_tasks` of any `Stop`/`SubagentStop` of the session. Finished = id missing from a later list. No `<task-notification>` reaches the parent for such a shell. `SubagentStop` of the owner does NOT finish the shell. A subagent is done only when it is out of the parent list and owns no listed shell. Handle a second `SubagentStart` for the same `agent_id` (reopen the row).
+2. **Stopped vs done subagent**: killed = no `SubagentStop`. Use `PostToolUse` TaskStop (`tool_input.task_id` = `agent_id`, `tool_response.task_type == "local_agent"`) or `<task-notification>` with `<status>killed</status>` -> "stopped". Done = `SubagentStop` + `<status>completed</status>`. Fallback: the id vanishes from the parent `background_tasks` with neither signal -> "ended". On disk: `meta.json` `finished:true` (optional).
+3. **Notification attribution**: no `agent_id` on `Notification`, and no `Notification` for subagent prompts in our tests. Attribute prompts only through `PermissionRequest.agent_id`. Use `Notification` as a main-session attention hint with a 10 s dedupe against `PermissionRequest`.
+4. **Usage sum**: incremental byte-offset read of the parent and every `subagents/agent-*.jsonl` file, full lines only, `type=="assistant"` lines only, dedupe by `message.id` (content blocks repeat `usage`), group by `message.model`, then price with Buddy's JSON. Verified equal to the transcript `cost-state` total. Hooks carry no cost.
+5. **Hooks disabled**: merge managed > local > project > user settings, read `disableAllHooks` and managed `allowManagedHooksOnly`, name the winning file. Add a heartbeat check (a `claude` process with no hook event after 30 s). Managed paths are DOCS-level, verify on a managed Mac.
+6. **SSH**: hook runs on the remote host. Detect with `SSH_CONNECTION` (always set over sshd) and `SSH_TTY` (pty only). Forward with `ssh -R /remote/buddy.sock:/local/buddy.sock` and set `StreamLocalBindUnlink yes` on the server (or use a unique remote path). Treat the socket as untrusted input.
+
+Interactive pty tests need a directory Claude Code already trusts. Run them in a throwaway project, not a real one.
+
+Status: DONE. E1-E6 appended. Items UNTESTED: foreground-subagent Notification, `idle_prompt`, user-initiated stop, SSH, managed paths, `/resume` dedupe.

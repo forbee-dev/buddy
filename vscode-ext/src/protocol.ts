@@ -9,8 +9,13 @@ export interface TerminalLike {
 export type Finder = (shellPid: number) => TerminalLike | undefined;
 export type ClaudeCheck = (shellPid: number) => Promise<boolean>;
 
-/** Newlines become spaces and control chars (except tab) are dropped, so text cannot submit or inject escapes. */
-export const sanitize = (t: string): string => t.replace(/[\r\n]/g, " ").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+/** Keeps tab and newline (CR and CRLF become LF). Drops other C0, DEL, and C1 controls, so no ESC can end the paste early. */
+export const sanitize = (t: string): string => t.replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
+
+/** Bracketed paste: Claude Code's TUI takes the text as one multi-line input, not one submit per line. */
+export const PASTE_START = "\x1b[200~";
+export const PASTE_END = "\x1b[201~";
+export const framed = (t: string): string => PASTE_START + t + PASTE_END;
 
 export interface Handled {
   ack?: Record<string, unknown>;
@@ -94,7 +99,9 @@ export async function handleLine(line: string, find: Finder, hasClaude: ClaudeCh
       return { ack: ackErr(reqId, "claude-not-foreground"), log: `send reqId=${reqId} shellPid=${pid}: claude-not-foreground` };
     }
     const clean = sanitize(text);
-    term.sendText(clean, submit ?? true);
+    term.sendText(framed(clean), false);
+    // Enter goes separately, after the paste has ended.
+    if (submit ?? true) term.sendText("", true);
     return { ack: { kind: "ack", reqId, ok: true }, log: `send reqId=${reqId} shellPid=${pid} len=${clean.length}` };
   }
   const term = find(pid);

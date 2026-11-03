@@ -30,13 +30,15 @@ final class BubbleSelection {
     var highlight: String?
     var shownResults: Set<String> = []
     /// Set by the question card. Gets plain keys (no ⌘/⌃/⌥) while the bubble is key; returns true when it used the key.
-    @ObservationIgnored var onKey: (@MainActor (QuestionKey, _ textFocused: Bool) -> Bool)?
+    @ObservationIgnored var onKey: (@MainActor (QuestionKey, _ textFocused: Bool, _ controlFocused: Bool) -> Bool)?
+    /// The request whose card already said "Ready".
+    @ObservationIgnored var readyFor: String?
     @ObservationIgnored private var markdownCache: (source: String, text: AttributedString)?
-    /// Allow / Always / Submit stay disabled until 700 ms after the card appears, changes, or stops moving (H1, S2).
+    /// Allow / Always / Submit stay disabled until 700 ms after the card appears, changes, or stops moving.
     var armed = false
     @ObservationIgnored private var armAt = Date.distantPast
     @ObservationIgnored private var arming = false
-    /// Permission detail text and stats, built once per request id (PF4).
+    /// Permission detail text and stats, built once per request id.
     @ObservationIgnored private var detailCache: (id: String, text: String, lines: Int, chars: Int)?
 
     init(_ id: String?) { sessionId = id }
@@ -76,7 +78,7 @@ final class BubbleSelection {
         contextExpanded = false
     }
 
-    /// Picker or mascot moved to another session: nothing typed for the old one carries over (C5).
+    /// Picker or mascot moved to another session: nothing typed for the old one carries over.
     func switchTo(_ sid: String?) {
         guard sid != sessionId else { return }
         sessionId = sid
@@ -146,24 +148,35 @@ final class BubbleController {
         }
     }
 
-    /// True when the question card used the key.
+    /// True when the question card (or a focused text field) used the key.
     private func handleKey(_ e: NSEvent) -> Bool {
-        guard e.window === panel, let onKey = selection.onKey,
-              e.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return false }
+        guard e.window === panel else { return false }
         let editor = panel.firstResponder as? NSTextView
         // Return during IME composition confirms the composition, not the card.
         if editor?.hasMarkedText() == true { return false }
+        if TextFieldKeys.keepInField(keyCode: Int(e.keyCode), command: e.modifierFlags.contains(.command), textFocused: editor != nil) {
+            editor?.keyDown(with: e)
+            return true
+        }
+        guard let onKey = selection.onKey, e.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return false }
         guard let key = Self.questionKey(e) else { return false }
-        return onKey(key, editor != nil)
+        return onKey(key, editor != nil, Self.controlFocused(panel))
     }
 
+    /// A control (not the hosting view or a text field) has keyboard focus: Space is the control's.
+    static func controlFocused(_ window: NSWindow) -> Bool {
+        guard let r = window.firstResponder else { return false }
+        return r !== window && r !== window.contentView && !(r is NSTextView)
+    }
+
+    /// Tab and Shift-Tab are not card keys: they move keyboard focus.
     static func questionKey(_ e: NSEvent) -> QuestionKey? {
         switch Int(e.keyCode) {
         case kVK_LeftArrow: return .left
         case kVK_RightArrow: return .right
         case kVK_UpArrow: return .up
         case kVK_DownArrow: return .down
-        case kVK_Tab: return .tab(shift: e.modifierFlags.contains(.shift))
+        case kVK_Tab: return nil
         case kVK_Space: return .space
         case kVK_Return, kVK_ANSI_KeypadEnter: return .returnKey
         default:
@@ -173,7 +186,8 @@ final class BubbleController {
     }
 
     func show(focus: Bool) {
-        if !focus && !panel.isVisible { selection.disarm() }
+        // A card that comes into view arms again, also when Review… on a notification opens it.
+        if !panel.isVisible { selection.disarm() }
         panel.orderFrontRegardless()
         // Focus only on a user click, so a new card never steals keystrokes from the terminal.
         if focus { panel.makeKey() }
@@ -209,7 +223,7 @@ final class BubbleController {
         x = min(max(x, screen.minX + 4), screen.maxX - size.width - 4)
         y = max(min(y, screen.maxY - size.height), screen.minY)
         panel.setFrameOrigin(NSPoint(x: x, y: y))
-        // A moving card must not take a click aimed at something else (review S2).
+        // A moving card must not take a click aimed at something else.
         if moved { selection.disarm() }
     }
 

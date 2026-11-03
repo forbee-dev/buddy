@@ -6,6 +6,7 @@ extension AppModel {
 
     /// Claude Desktop sessions use the inbox only: never the editor route, never keystrokes.
     func route(for s: Session) -> PromptRoute {
+        if s.remote != nil { return .none }
         #if DEBUG
         if Demo.on { return s.terminal == .claudeDesktop ? .inbox : .editor(s.terminal.displayName) }
         #endif
@@ -15,8 +16,9 @@ extension AppModel {
         return .none
     }
 
-    /// nil when a next prompt can go to this session now; else the reason to show (review H2).
+    /// nil when a next prompt can go to this session now; else the reason to show.
     func promptRefusal(_ s: Session) -> String? {
+        if s.remote != nil { return PromptGuard.refusal(state: s.state, status: nil, remote: true) }
         guard let pid = s.env.claudePid else { return "Buddy does not know the Claude process." }
         let desktop = s.terminal == .claudeDesktop
         return PromptGuard.refusal(state: s.state, status: ProcInfo.status(of: pid), desktop: desktop,
@@ -25,18 +27,28 @@ extension AppModel {
 
     func sendPrompt(_ raw: String, to sid: String) async -> SendResult {
         let text = PromptGuard.sanitize(raw)
-        guard let s = session(sid), !text.trimmingCharacters(in: .whitespaces).isEmpty else { return .failed }
-        if let reason = promptRefusal(s) { return status(sid, "Not sent. \(reason) Use Jump.", .failed) }
+        guard let s = session(sid), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .failed }
+        if let reason = promptRefusal(s) {
+            record(sid, "NextPrompt", nil, "not sent: refused")
+            return status(sid, "Not sent. \(reason) Use Jump.", .failed)
+        }
+        let result: SendResult
         switch route(for: s) {
         case .editor:
             guard let shell = s.env.shellPid else { return .failed }
             let ack = await ext.send(shellPid: shell, text: text)
-            return ack.ok ? status(sid, "Sent to the terminal.", .sent) : status(sid, "Not sent: \(ack.error ?? "error").", .failed)
+            // The extension's error text is untrusted: revealed and clipped.
+            let why = Activity.clip(ack.error ?? "error", 64)
+            result = ack.ok ? status(sid, "Sent to the terminal.", .sent) : status(sid, "Not sent: \(why).", .failed)
+            record(sid, "NextPrompt", nil, ack.ok ? "sent via editor" : "not sent: \(why)")
         case .inbox:
-            return await sendInbox(text, session: s)
+            result = await sendInbox(text, session: s)
+            record(sid, "NextPrompt", nil, result == .sent ? "sent via inbox" : "not sent: inbox refused")
         case .none:
-            return status(sid, "No route to this session. Use Jump.", .failed)
+            result = status(sid, "No route to this session. Use Jump.", .failed)
+            record(sid, "NextPrompt", nil, "not sent: no route")
         }
+        return result
     }
 
     /// Shows and announces the result line.
@@ -76,8 +88,21 @@ extension AppModel {
     // MARK: Jump
 
     func jump(_ sid: String) {
-        guard let s = session(sid) else { return }
-        if let note = Jumper.jump(to: s, ext: ext) { showNote(sid, note) }
+        guard var s = session(sid) else { return }
+        if let r = s.remote {
+            // The local terminal that runs the ssh client, never a remote pid.
+            guard let env = RemoteJump.env(ancestors: ProcInfo.ancestors(of: r.sshPid), tty: ProcInfo.tty(of: r.sshPid),
+                                           bundleId: Jumper.terminalApp(above: r.sshPid)?.bundleIdentifier, extShells: ext.shellPids) else { return }
+            s.env = env
+        }
+        let target = s
+        jumpTask?.cancel()
+        jumpGeneration += 1
+        let ticket = JumpTicket(generation: jumpGeneration)
+        jumpTask = Task {
+            let note = await Jumper.jump(to: target, ext: ext, ticket: ticket, current: { [weak self] in self?.jumpGeneration ?? -1 })
+            if let note, ticket.isCurrent(jumpGenerationNow: jumpGeneration) { showNote(sid, note) }
+        }
     }
 
     // MARK: Hooks

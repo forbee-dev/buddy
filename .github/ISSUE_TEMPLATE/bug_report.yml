@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in Buddy does not work as expected.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "14.6"
+    validations:
+      required: true
+  - type: input
+    id: buddy
+    attributes:
+      label: Buddy version
+      description: Settings → About.
+    validations:
+      required: true
+  - type: input
+    id: claude
+    attributes:
+      label: Claude Code version
+      description: Run `claude --version`.
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal or IDE
+      description: For example Terminal.app, iTerm2, VS Code, Cursor, Claude Desktop.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics report
+      description: In Buddy, open Settings → Diagnostics and click "Copy diagnostics report". Paste it here. Check it first and remove anything private.
+      render: text
+    validations:
+      required: true

@@ -24,10 +24,10 @@ Other events keep only these parts of the big fields:
 
 | Field | Kept | Used for |
 |---|---|---|
-| `tool_input` | `description`, `subagent_type`, `command`, `task_id` (strings, max 200 chars each), `run_in_background` (bool) | subagent label, shell label, TaskStop |
-| `tool_response` | `agentId`, `backgroundTaskId` (strings, max 200 chars) | link a subagent to its Agent call; shell id |
+| `tool_input` | `description`, `subagent_type`, `command`, `task_id`, `file_path` (strings, max 200 chars each), `run_in_background` (bool) | subagent label, shell label, TaskStop, tips |
+| `tool_response` | `agentId`, `backgroundTaskId`, `task_type` (strings, max 200 chars) | link a subagent to its Agent call; shell id; TaskStop of a subagent or a shell |
 | `background_tasks` | `id`, `type`, `status` of each entry (max 50 entries) | a shell that left the list has finished |
-| `prompt` | never sent. For a `<task-notification>` prompt the hook sends only its `<task-id>` as `task_id` (ASCII letters, digits, `-`, `_`, max 64 chars) | a background task ended |
+| `prompt` | never sent. For a `<task-notification>` prompt the hook sends only its `<task-id>` as `task_id` (ASCII letters, digits, `-`, `_`, max 64 chars) and its `<status>` as `task_status` (ASCII letters and digits, max 20 chars) | a background task ended, and how |
 
 Everything else in `tool_input`, `tool_response`, and `prompt` (Agent prompts, command output, subagent results) never leaves the hook.
 
@@ -35,10 +35,13 @@ Everything else in `tool_input`, `tool_response`, and `prompt` (Agent prompts, c
 
 Events: `SubagentStart` and `SubagentStop` (non-blocking), plus `PreToolUse` with the matcher `AskUserQuestion|Agent|Task`. Every event fired inside a subagent carries `agent_id`. The app routes such events to that subagent only; they never change the main session state. The one exception is attention: a subagent's `PermissionRequest` shows the normal card, and the buddy shows "needs permission" until it is answered.
 
-- Subagent: created on `SubagentStart`. Its label is the `description` of the oldest `PreToolUse` `Agent` call in the same session that has no subagent yet (FIFO). `PostToolUse` `Agent` with `tool_response.agentId` fixes a wrong pairing. Done on `SubagentStop`, failed on `PostToolUseFailure` for its `Agent` call. `last_assistant_message` of `SubagentStop` is trimmed to 300 chars.
+- Subagent: created on `SubagentStart`. Its label is the `description` of the oldest `PreToolUse` `Agent` call in the same session that has no subagent yet (FIFO). `PostToolUse` `Agent` with `tool_response.agentId` fixes a wrong pairing. Failed on `PostToolUseFailure` for its `Agent` call. `last_assistant_message` of `SubagentStop` is trimmed to 300 chars.
+- Done on `SubagentStop`, except while a shell it started is still running: then it stays running. A `SubagentStop` with an `agent_id` that never started is ignored. A second `SubagentStart` with the same `agent_id` resumes the same row (running again, no duplicate).
+- Stopped (killed): `PostToolUse` `TaskStop` whose `tool_input.task_id` is the `agent_id` and `tool_response.task_type` is `local_agent`, or a `<task-notification>` with `task_status` `killed`. A killed subagent gets no `SubagentStop`. `task_status` `completed` marks it done and `failed` marks it failed, unless it still owns a running shell.
 - Subagent permission: it has no `tool_use_id`, so a later `PostToolUse`, `PostToolUseFailure`, or `PermissionDenied` clears the card only when its `agent_id` and `tool_name` match. Answers bind to the request id, as for the main session.
-- Shell: created on `PostToolUse` `Bash` with `tool_input.run_in_background: true`; the id is `tool_response.backgroundTaskId`. Finished when a later main `Stop` has a `background_tasks` array without that id, or on a `<task-notification>` `UserPromptSubmit` whose `task_id` names it. Stopped on `PostToolUse` `TaskStop` with `tool_input.task_id`. A `Stop` without `background_tasks` changes nothing.
-- The same main `Stop` rule marks a subagent done when its id left `background_tasks` (a safety net for a lost `SubagentStop`).
+- Shell: created on `PostToolUse` `Bash` with `tool_input.run_in_background: true`; the id is `tool_response.backgroundTaskId`. Its owner is the event's `agent_id` (a shell started inside a subagent); the Activity list shows it with that subagent. Finished when the newest `background_tasks` of any `Stop` or `SubagentStop` of the session no longer has that id, or on a `<task-notification>` `UserPromptSubmit` whose `task_id` names it. Stopped on `PostToolUse` `TaskStop` with `tool_input.task_id` (`task_type` not `local_agent`), or a notification with `task_status` `killed`. A `Stop` without `background_tasks` changes nothing.
+- A main `Stop` also marks a subagent done when its id left `background_tasks` and it owns no listed shell (a safety net for a lost `SubagentStop`).
+- `Notification` events never change subagents. Only `PermissionRequest` with `agent_id` gives a subagent attention.
 - `SessionEnd` ends all running subagents and shells. Per session the app keeps 20 subagents and 10 shells. Ended entries expire after 10 minutes; past the cap the oldest ended entries go first.
 
 ```json
@@ -84,12 +87,38 @@ If `wantsReply` is `true`, the app answers on the same connection with exactly o
 
 `buddy-hook` fails open: if the socket is missing, refuses, or any error happens, it exits 0 with no output. It never exits 2.
 
+## remote hook → app (`remote.sock`)
+
+Opt-in (Settings → SSH). Setup and trust model: [SSH.md](SSH.md), [SECURITY.md](SECURITY.md).
+
+- Socket: `~/Library/Application Support/Buddy/remote.sock`, same folder, lock, modes, framing, line limit, 64-connection cap, and 5 s first-message timeout as `buddy.sock`. It exists only while the setting is on.
+- On the host, `buddy-hook-remote` (python3 3.8+, stdlib only) connects to `$BUDDY_REMOTE_SOCK` or `~/.buddy/buddy.sock` (an `ssh -R` forward to `remote.sock`) with a 0.5 s timeout, then reads stdin (max 1 MB).
+- Only one message kind: `hook`. Anything else, or a second message, closes the connection.
+- The app accepts the message only when the peer uid is the user's, the peer process `realpath` is an allowed ssh client, `token` matches (constant-time compare), and `remote` is present. Otherwise it closes the connection and Diagnostics shows "rejected: <reason>".
+
+```json
+{"kind":"hook","id":"<uuid>","wantsReply":false,"payload":{...slimmed...},"env":{"claudePid":4242,"ssh":true,"sshTty":true,"entrypoint":"cli","attended":"1"},"remote":{"host":"devbox","user":"you"},"token":"<64 hex>"}
+```
+
+| Field | Meaning |
+|---|---|
+| `payload` | Slimmed by the hook with the same allowlist as `buddy-hook` (the table above). The app slims it again and drops `transcript_path`. Keep `slim()` in `scripts/remote/buddy-hook-remote` in sync with `HookPayload`; `RemoteHookParityTests` compares them. The hook counts lengths in code points, Swift in characters. |
+| `env.claudePid` | `CLAUDE_PID` on the host (fallback: the hook's parent pid). A REMOTE pid: it only tells sessions on one connection apart (`clear`/`resume` rekeying). |
+| `env.ssh`, `env.sshTty` | `SSH_CONNECTION` and `SSH_TTY` present. Informational; v1 does not use them. |
+| `env.entrypoint`, `env.attended` | As for the local hook (max 32 chars). The app keeps only `attended`. |
+| `remote.host`, `remote.user` | Short host name and user on the host. Display only (`host:project` tag), never routing. Hidden characters revealed, max 64 chars. |
+| `token` | The shared secret from `~/.config/buddy/token`. Dropped after the check. |
+
+- Blocking events and replies work as on the main socket: `wantsReply` is `true` for `PermissionRequest`, the app answers with one `reply` line on the same connection, and the hook prints `output` (3600 s wait).
+- The hook fails open: on any error (no socket, no token, a token file readable by group or others, oversize stdin, bad JSON) it exits 0 with no output. It never exits 2.
+- Remote sessions: the tag shows `host:project`; looks key on `host:cwd`; liveness follows the local `ssh` pid; Jump raises the terminal above that pid; next prompt is refused; no transcript (tokens show "remote").
+
 ## extension → app
 
 The extension keeps one long-lived connection. The first line must be `ext-hello`; it makes the connection an **extension** connection. An extension connection can send only `ext-terminals` and `ack` after that. A `hook` message on it closes the connection. The first line:
 
 ```json
-{"kind":"ext-hello","editor":"vscode","appPid":4567,"version":"0.1.2","terminals":[{"shellPid":122,"name":"zsh"}],"workspaceFolders":["/Users/me/proj"]}
+{"kind":"ext-hello","editor":"vscode","appPid":4567,"version":"0.1.3","terminals":[{"shellPid":122,"name":"zsh"}],"workspaceFolders":["/Users/me/proj"]}
 ```
 
 - `editor`: `"vscode"` or `"cursor"`.
@@ -114,12 +143,14 @@ Send it also when the workspace folders change (`onDidChangeWorkspaceFolders`). 
 {"kind":"focus","reqId":"<uuid>","shellPid":122}
 ```
 
-- `send`: type `text` into the terminal whose shell pid is `shellPid` (`terminal.sendText(text, submit)`). `submit: true` means press Enter after the text.
+- `send`: put `text` into the terminal whose shell pid is `shellPid`. `submit: true` means press Enter after the text.
   - Before it sends, the app checks: the session is `done`, `idle`, or `starting`; claude is alive; claude is the foreground process group of its tty; claude is not stopped. If a check fails, the app sends nothing.
-  - `text` never contains C0 control characters (tab is allowed) or newlines (they become spaces). It is at most 32 KB of UTF-8.
-- `focus`: reveal and focus that terminal (`terminal.show(false)`), The VS Code API cannot raise the OS window. The app raises the window first (Accessibility, or the editor CLI with the folder path), then sends `focus`.
+  - `text` can contain newlines (`\n`) and tabs. It never contains other C0 controls, DEL, or C1 controls (U+0080 to U+009F). CR and CRLF become `\n`. It is at most 32 KB of UTF-8.
+  - Extension 0.1.3 and later: the extension cleans `text` again with the same rule. Then it sends a bracketed paste, `terminal.sendText("\x1b[200~" + text + "\x1b[201~", false)`. If `submit` is true, it then presses Enter with a separate `terminal.sendText("", true)`. Claude Code's TUI takes the paste as one multi-line prompt. A plain `sendText` with newlines would submit each line. VS Code turns each `\n` into `\r` before it writes to the pty, as in a real paste. The text has no ESC, so it cannot end the paste early.
+  - Extension 0.1.2 and older turn newlines into spaces and type the text.
+- `focus`: reveal and focus that terminal (`terminal.show(false)`). The VS Code API cannot raise the OS window. The app raises the window first (Accessibility, or the editor CLI with the folder path), then sends `focus`.
 
-## extension → app
+## extension → app: acks
 
 Answer every `send` and `focus` with one ack:
 
@@ -138,3 +169,4 @@ The app can restart. The extension retries the connection (for example every 5 s
 
 - Never log `messagingToken`, prompts, commands, or tool input.
 - The socket is local only and owned by the user (0600 in a 0700 directory).
+- Never log the SSH token. The main socket refuses messages with `remote` or `token`.

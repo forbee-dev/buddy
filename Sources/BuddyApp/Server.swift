@@ -7,13 +7,14 @@ import BuddyCore
 final class Connection {
     enum Role { case unknown, hook, ext }
     let fd: Int32
-    /// The first message decides the role; a hook connection carries one hook message only (review M2).
+    /// The first message decides the role; a hook connection carries one hook message only.
     var role: Role = .unknown
     let peerPid: pid_t?
+    /// Taken at accept: names the connecting process even if it exits and its pid is reused.
+    let peerToken: audit_token_t?
     private var source: DispatchSourceRead?
     private var buffer = LineBuffer()
     private var chunk = [UInt8](repeating: 0, count: 65536)
-    var hookRequestIds: Set<String> = []
     var isClosed = false
     var onLine: ((Data, Connection) -> Void)?
     var onClose: ((Connection) -> Void)?
@@ -21,6 +22,7 @@ final class Connection {
     init(fd: Int32) {
         self.fd = fd
         self.peerPid = PeerCheck.peerPid(fd)
+        self.peerToken = PeerCheck.peerToken(fd)
         var one: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
         UnixSocket.setSendTimeout(fd, seconds: 1)
@@ -69,12 +71,19 @@ final class Connection {
     }
 }
 
+/// Identity, so `PendingReplies` can key held hooks by connection.
+extension Connection: Hashable {
+    nonisolated static func == (a: Connection, b: Connection) -> Bool { a === b }
+    nonisolated func hash(into h: inout Hasher) { h.combine(ObjectIdentifier(self)) }
+}
+
 @MainActor
 final class SocketServer {
     static let maxConnections = 64
     let path: String
     private var listenFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?
+    private var paused = false
     private var connections: [ObjectIdentifier: Connection] = [:]
     var onMessage: ((WireMessage, Connection) -> Void)?
     var onClose: ((Connection) -> Void)?
@@ -123,12 +132,27 @@ final class SocketServer {
         }
     }
 
+    /// Closes the listener and every open connection, and removes the socket file.
+    func stop() {
+        // libdispatch traps when a suspended source is released.
+        if paused { acceptSource?.resume(); paused = false }
+        acceptSource?.cancel()
+        acceptSource = nil
+        if listenFD >= 0 { Darwin.close(listenFD); listenFD = -1 }
+        connections.values.forEach { $0.close() }
+        unlink(path)
+    }
+
     /// Out of file descriptors: stop accepting for a second instead of spinning.
     private func pauseAccepting() {
-        acceptSource?.suspend()
+        guard !paused, let src = acceptSource else { return }
+        src.suspend()
+        paused = true
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(1))
-            self?.acceptSource?.resume()
+            guard let self, self.paused else { return }
+            self.paused = false
+            self.acceptSource?.resume()
         }
     }
 }

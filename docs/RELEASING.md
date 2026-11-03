@@ -6,7 +6,11 @@
    - `CFBundleVersion` is the build time (`YYYYMMDDhhmm`).
 3. Run `./scripts/make-dmg.sh`. It builds `build/Buddy-<version>.dmg`: Buddy.app plus an Applications link, UDZO compressed, signed with the same identity.
 4. Check the DMG: `hdiutil attach -nobrowse build/Buddy-<version>.dmg`, look at the contents, then `hdiutil detach`.
-5. Share the DMG. Users follow [INSTALL.md](INSTALL.md) ("Team install").
+5. Move the `[Unreleased]` entries in `CHANGELOG.md` under a new `[<version>]` heading with the date.
+6. Commit, then tag: `git tag v<version> && git push origin main v<version>`.
+7. Make the GitHub release for `v<version>` and attach the DMG: `gh release create v<version> build/Buddy-<version>.dmg`.
+8. Update the Homebrew cask: follow "Update for each release" in [HOMEBREW.md](HOMEBREW.md).
+9. Share the DMG. Users follow [INSTALL.md](INSTALL.md) ("Team install").
 
 ## Local dev install
 

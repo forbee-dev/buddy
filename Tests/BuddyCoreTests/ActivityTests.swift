@@ -133,7 +133,7 @@ private func stop(_ tasks: String) -> HookMessage { hook("Stop", extra: ["backgr
         let mainStop = s.apply(hook("Stop"))
         #expect(mainStop.staleRequests.isEmpty)
         #expect(s.sessions["s1"]?.state == .needsPermission)
-        let resolved = s.resolve(requestId: "r2")
+        let resolved = s.resolve(sid: "s1", requestId: "r2")
         #expect(resolved)
         #expect(s.sessions["s1"]?.state == .done)
         #expect(s.sessions["s1"]?.subagents["a1"]?.state == .running)

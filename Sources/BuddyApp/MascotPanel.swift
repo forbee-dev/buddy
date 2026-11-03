@@ -14,7 +14,7 @@ final class MascotPanel: NSPanel {
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-        // Keeps commands and answers out of screen sharing and screenshots (review L6).
+        // Keeps commands and answers out of screen sharing and screenshots.
         sharingType = .none
         #if DEBUG
         // `--demo-cards` only: fake data, and the card screenshots need the windows to be capturable.
@@ -44,13 +44,18 @@ final class ActionItem: NSMenuItem {
     @objc private func fire() { handler() }
 }
 
-/// The sprite. Handles click, drag, double-click, right-click, and VoiceOver press.
+/// The name tag. Forwards clicks, so the tag acts like the sprite.
+final class TagLabel: NSTextField {
+    var onClick: ((Int) -> Void)?
+    override func mouseUp(with event: NSEvent) { onClick?(event.clickCount) }
+}
+
+/// The sprite. Handles click (with count), drag, right-click, and VoiceOver press.
 final class SpriteView: NSView {
-    var onClick: (() -> Void)?
+    var onClick: ((Int) -> Void)?
     var onDragBegan: (() -> Void)?
     var onDrag: ((NSPoint) -> Void)?
     var onDrop: (() -> Void)?
-    var onDoubleClick: (() -> Void)?
     var onMenu: ((NSPoint) -> Void)?
     private var downAt: NSPoint?
     private var dragging = false
@@ -82,14 +87,12 @@ final class SpriteView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         defer { downAt = nil; dragging = false }
-        if dragging { onDrop?() }
-        else if event.clickCount == 2 { onDoubleClick?() }
-        else { onClick?() }
+        if dragging { onDrop?() } else { onClick?(event.clickCount) }
     }
 
     override func rightMouseDown(with event: NSEvent) { onMenu?(convert(event.locationInWindow, from: nil)) }
 
-    override func accessibilityPerformPress() -> Bool { onClick?(); return true }
+    override func accessibilityPerformPress() -> Bool { onClick?(1); return true }
 
     override func accessibilityPerformShowMenu() -> Bool { onMenu?(NSPoint(x: bounds.midX, y: bounds.midY)); return true }
 }

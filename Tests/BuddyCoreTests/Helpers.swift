@@ -10,7 +10,12 @@ func hook(_ event: String, session: String = "s1", id: String = UUID().uuidStrin
                        env: HookEnv(claudePid: pid, shellPid: 99, tty: "ttys001", attended: "1"))
 }
 
-func json(_ s: String) -> JSONValue { try! JSONDecoder().decode(JSONValue.self, from: Data(s.utf8)) }
+func json(_ s: String) -> JSONValue {
+    do { return try JSONDecoder().decode(JSONValue.self, from: Data(s.utf8)) } catch {
+        Issue.record("Test JSON does not parse: \(error)")
+        return .null
+    }
+}
 
 /// Parses installer output as a JSON object.
 func obj(_ d: Data?) throws -> [String: Any] {

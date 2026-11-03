@@ -10,7 +10,7 @@ public struct AgentCall: Sendable, Equatable {
 
 public struct Subagent: Sendable, Equatable, Identifiable {
     public enum State: String, Sendable {
-        case running, needsPermission, asking, done, failed
+        case running, needsPermission, asking, done, failed, stopped
         public var isActive: Bool { self == .running || self == .needsPermission || self == .asking }
     }
     public var id: String
@@ -31,6 +31,8 @@ public struct Shell: Sendable, Equatable, Identifiable {
     public var id: String
     public var label: String
     public var state: State = .running
+    /// `agent_id` of the subagent that started it (E1); nil for the main session.
+    public var owner: String?
     public var startedAt: Date
     public var endedAt: Date?
 }
@@ -39,11 +41,11 @@ public enum Activity {
     public static let maxSubagents = 20
     public static let maxShells = 10
     static let maxCalls = 20
-    /// Done, failed, finished, and stopped entries expire after this.
+    /// Done, failed, stopped, and finished entries expire after this.
     public static let keepEnded: TimeInterval = 600
 
     /// Model text for a label: revealed, one line, at most `n` characters.
-    static func clip(_ s: String, _ n: Int) -> String {
+    public static func clip(_ s: String, _ n: Int) -> String {
         let r = DisplayText.reveal(s.trimmingCharacters(in: .whitespacesAndNewlines))
         return r.count > n ? String(r.prefix(n - 1)) + "…" : r
     }
@@ -106,12 +108,17 @@ extension Session {
             guard input?["run_in_background"]?.bool == true, let tid = p["tool_response"]?["backgroundTaskId"]?.string,
                   shells[tid] == nil else { break }
             let text = [input?["description"]?.string, input?["command"]?.string].compactMap { $0 }.first { !$0.isEmpty }
-            shells[tid] = Shell(id: tid, label: Activity.clip(text ?? "shell", 60), startedAt: now)
+            shells[tid] = Shell(id: tid, label: Activity.clip(text ?? "shell", 60), owner: p["agent_id"]?.string, startedAt: now)
         case ("PostToolUse", "TaskStop"):
-            if let tid = input?["task_id"]?.string { endShell(tid, .stopped, now: now) }
+            // A killed subagent gets no SubagentStop (E2); `task_type` tells a subagent from a shell.
+            guard let tid = input?["task_id"]?.string else { break }
+            let type = p["tool_response"]?["task_type"]?.string
+            if type != "local_agent" { endShell(tid, .stopped, now: now) }
+            if type != "local_bash" { setSubagent(tid, .stopped, now: now) }
         default:
             break
         }
+        if event == "PostToolUse" { tip = Tips.match(tool: tool, input: input) }
     }
 
     /// FIFO gave `agentId` the first open call; PostToolUse knows the exact call. Swap when they differ.
@@ -130,18 +137,27 @@ extension Session {
         subagents[agentId] = a
     }
 
-    /// Main `Stop`: what left `background_tasks` has finished. A missing list (older Claude Code) proves nothing.
-    mutating func applyBackgroundTasks(_ tasks: JSONValue?, now: Date) {
+    /// The newest `background_tasks` of any `Stop` or `SubagentStop` is the truth for shells (E1).
+    /// Only a main `Stop` ends subagents, and never one that still owns a listed shell.
+    /// A missing list (older Claude Code) proves nothing.
+    mutating func applyBackgroundTasks(_ tasks: JSONValue?, main: Bool, now: Date) {
         guard let list = tasks?.array else { return }
         let ids = Set(list.compactMap { $0["id"]?.string })
         for id in shells.keys where !ids.contains(id) { endShell(id, .finished, now: now) }
-        for (id, a) in subagents where a.state.isActive && !ids.contains(id) { setSubagent(id, .done, now: now) }
+        guard main else { return }
+        for (id, a) in subagents where a.state.isActive && !ids.contains(id) && !ownsRunningShell(id) { setSubagent(id, .done, now: now) }
     }
 
-    /// A `<task-notification>` prompt names a task that ended.
-    mutating func applyTaskNotification(_ id: String, now: Date) {
-        endShell(id, .finished, now: now)
-        setSubagent(id, .done, now: now)
+    /// A subagent with a running shell is not finished, whatever its SubagentStop says (E1).
+    func ownsRunningShell(_ agent: String) -> Bool { shells.values.contains { $0.owner == agent && $0.state == .running } }
+
+    /// A `<task-notification>` prompt names a task that ended. `status` is its `<status>` token.
+    mutating func applyTaskNotification(_ id: String, status: String?, now: Date) {
+        let killed = status == "killed"
+        endShell(id, killed ? .stopped : .finished, now: now)
+        // "completed" also comes for a subagent that "is waiting on its own background work" (E1).
+        guard !ownsRunningShell(id) else { return }
+        setSubagent(id, killed ? .stopped : status == "failed" ? .failed : .done, now: now)
     }
 
     mutating func endActivity(now: Date) {
@@ -149,8 +165,14 @@ extension Session {
         for id in shells.keys { endShell(id, .finished, now: now) }
     }
 
-    mutating func pruneActivity(now: Date) {
-        subagents = Activity.pruned(subagents, cap: Activity.maxSubagents, now: now, ended: \.endedAt, started: \.startedAt)
-        shells = Activity.pruned(shells, cap: Activity.maxShells, now: now, ended: \.endedAt, started: \.startedAt)
+    /// True when it dropped a row.
+    @discardableResult
+    mutating func pruneActivity(now: Date) -> Bool {
+        let a = Activity.pruned(subagents, cap: Activity.maxSubagents, now: now, ended: \.endedAt, started: \.startedAt)
+        let b = Activity.pruned(shells, cap: Activity.maxShells, now: now, ended: \.endedAt, started: \.startedAt)
+        guard a.count != subagents.count || b.count != shells.count else { return false }
+        subagents = a
+        shells = b
+        return true
     }
 }

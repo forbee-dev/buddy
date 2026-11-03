@@ -1,0 +1,9 @@
+{
+  "note": "Edit to match your plan; verify at anthropic.com/pricing",
+  "unit": "USD per million tokens. Placeholder values.",
+  "models": {
+    "claude-opus-5-5": { "input": 5.0, "output": 25.0, "cacheWrite": 6.25, "cacheRead": 0.5 },
+    "claude-sonnet-5-5": { "input": 3.0, "output": 15.0, "cacheWrite": 3.75, "cacheRead": 0.3 },
+    "claude-haiku-5-5": { "input": 1.0, "output": 5.0, "cacheWrite": 1.25, "cacheRead": 0.1 }
+  }
+}

@@ -28,7 +28,7 @@ import Testing
         #expect(s.sessions["s1"]?.pending == nil)
         #expect(s.sessions["s1"]?.state == .working)
         #expect(s.sessions["s1"]?.note == "Answered in terminal")
-        let resolved = s.resolve(requestId: "r1")
+        let resolved = s.resolve(sid: "s1", requestId: "r1")
         #expect(resolved == false)
     }
 
@@ -38,7 +38,7 @@ import Testing
         #expect(s.sessions["s1"]?.state == .asking)
         _ = s.apply(hook("PermissionRequest", id: "q1", extra: ["tool_name": "AskUserQuestion"]))
         #expect(s.sessions["s1"]?.pending?.kind == .question)
-        let resolved = s.resolve(requestId: "q1")
+        let resolved = s.resolve(sid: "s1", requestId: "q1")
         #expect(resolved)
         #expect(s.sessions["s1"]?.state == .working)
         let after = s.apply(hook("PostToolUse", extra: ["tool_name": "AskUserQuestion"]))
@@ -48,8 +48,8 @@ import Testing
     @Test func connectionCloseClearsCard() {
         var s = SessionStore()
         _ = s.apply(hook("PermissionRequest", id: "r1", extra: ["tool_name": "Bash"]))
-        let closed = s.requestClosed("r1")
-        #expect(closed == "s1")
+        let closed = s.requestClosed(sid: "s1", requestId: "r1")
+        #expect(closed)
         #expect(s.sessions["s1"]?.pending == nil)
         #expect(s.sessions["s1"]?.state == .working)
     }

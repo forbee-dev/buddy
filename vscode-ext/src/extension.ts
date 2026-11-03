@@ -54,7 +54,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       kind: "ext-hello",
       editor: vscode.env.appName.includes("Cursor") ? "cursor" : "vscode",
       appPid: process.pid,
-      version: "0.1.2",
+      version: "0.1.3",
       terminals: publicList(await refresh()),
       workspaceFolders: workspaceFolders(),
     }),

@@ -1,7 +1,7 @@
 # Claude Desktop: facts for Buddy
 
 Date: 2026-11-03. Claude Desktop 4.4212.0 (`com.anthropic.claudefordesktop`), bundled Claude Code 2.1.309. Desktop was not running.
-Labels: **DOCS** = official docs. **OBSERVED** = seen on this Mac (read-only, structure only). **UNTESTED** = inference or not run yet. The hands-on test in `~/Desktop/buddy-desktop-test/` turns UNTESTED items into OBSERVED.
+Labels: **DOCS** = official docs. **OBSERVED** = seen on this Mac (read-only, structure only). **UNTESTED** = inference or not run yet.
 Docs: https://code.claude.com/docs/en/desktop.md, `hooks.md`, `settings.md`, `cloud-environments.md`, `claude-code-on-the-web.md`, `remote-control.md`, `cross-session-messaging.md`.
 No conversation content, prompts, tokens or personal data are copied here.
 
@@ -106,7 +106,7 @@ The test shows which of these three work. Note the VS Code/Cursor extension also
 - Feasible but weak: show "Claude Desktop is running" (NSWorkspace) and a Jump button. No state.
 
 ## 4. Folder facts used (read only)
-Listed names and JSON keys only, nothing under `~/Library/Application Support/Claude/` or `~/.claude/` was changed. File `buddy-tokens.json` (57 bytes, July) exists in the Claude folder. Content not read. Its name suggests an earlier Buddy build wrote it. Check and remove it by hand if unused.
+Listed names and JSON keys only, nothing under `~/Library/Application Support/Claude/` or `~/.claude/` was changed.
 
 ## Design impact for Buddy
 

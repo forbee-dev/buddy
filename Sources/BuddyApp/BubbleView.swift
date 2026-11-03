@@ -15,9 +15,9 @@ struct BubbleView: View {
                 header(s)
                 if s.hasActivity { tabs(s) }
                 if activeTab(s) == .activity {
-                    ActivityList(session: s, draft: selection)
+                    ActivityList(session: s, draft: selection, usage: model.usageText(s.id))
                 } else {
-                    card(s)
+                    SessionCard(model: model, session: s, draft: selection)
                     if let note = s.note {
                         Label(note, systemImage: "info.circle").font(.callout).foregroundStyle(.secondary)
                     }
@@ -111,16 +111,23 @@ struct BubbleView: View {
         if let p = s.pending { return p.kind == .question ? "\(who) asks" : "\(who) wants to run \(DisplayText.reveal(p.toolName))" }
         return s.state == .done ? "Claude finished" : "\(s.terminal.displayName) · \(s.state.label)"
     }
+}
 
-    @ViewBuilder private func card(_ s: Session) -> some View {
-        if let p = s.pending, p.kind == .permission {
-            PermissionCard(model: model, session: s, pending: p, draft: selection)
-        } else if let p = s.pending, p.kind == .question {
-            QuestionCard(model: model, session: s, pending: p, questions: AskQuestion.parse(p.toolInput), draft: selection)
-        } else if s.state == .done || s.state == .idle || s.state == .starting {
-            DoneCard(model: model, session: s, draft: selection)
+/// The card for a session's current state. Shared by the bubble and the command palette.
+struct SessionCard: View {
+    let model: AppModel
+    let session: Session
+    let draft: BubbleSelection
+
+    var body: some View {
+        if let p = session.pending, p.kind == .permission {
+            PermissionCard(model: model, session: session, pending: p, draft: draft)
+        } else if let p = session.pending, p.kind == .question {
+            QuestionCard(model: model, session: session, pending: p, questions: AskQuestion.parse(p.toolInput), draft: draft)
+        } else if session.state == .done || session.state == .idle || session.state == .starting {
+            DoneCard(model: model, session: session, draft: draft)
         } else {
-            StatusCard(model: model, session: s)
+            StatusCard(model: model, session: session)
         }
     }
 }
@@ -131,6 +138,8 @@ enum BubbleTab: Hashable { case card, activity }
 struct ActivityList: View {
     let session: Session
     @Bindable var draft: BubbleSelection
+    /// "42.1k tok · $0.31" for the whole session, subagents included.
+    var usage: String?
 
     private struct Row: Identifiable {
         let id: String
@@ -140,27 +149,40 @@ struct ActivityList: View {
         let shell: Shell?
     }
 
+    /// A shell started inside a subagent comes right after that subagent's row (E1).
     private var rows: [Row] {
         let agents = session.subagents.values.map { Row(id: $0.id, running: $0.state.isActive, started: $0.startedAt, agent: $0, shell: nil) }
         let shells = session.shells.values.map { Row(id: $0.id, running: $0.state == .running, started: $0.startedAt, agent: nil, shell: $0) }
-        return (agents + shells).sorted { ($0.running ? 0 : 1, $1.started, $0.id) < ($1.running ? 0 : 1, $0.started, $1.id) }
-    }
-
-    var body: some View {
-        FitScroll(key: "activity", maxHeight: min(360, FitScroll<EmptyView>.screenCap), draft: draft) {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(rows) { r in
-                    if let a = r.agent { agentRow(a) } else if let s = r.shell { shellRow(s) }
-                }
-            }
-            .padding(.horizontal, 1)
+        let owned = shells.filter { $0.shell?.owner.map { session.subagents[$0] != nil } ?? false }
+        let order = { (a: Row, b: Row) in (a.running ? 0 : 1, b.started, a.id) < (b.running ? 0 : 1, a.started, b.id) }
+        return (agents + shells.filter { r in !owned.contains { $0.id == r.id } }).sorted(by: order).flatMap { r in
+            [r] + (r.agent.map { a in owned.filter { $0.shell?.owner == a.id }.sorted(by: order) } ?? [])
         }
     }
 
-    private func agentRow(_ a: Subagent) -> some View {
+    var body: some View {
+        if let usage {
+            Label(usage, systemImage: "gauge.with.dots.needle.33percent")
+                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                .accessibilityLabel("Session usage: \(usage)")
+        }
+        FitScroll(key: "activity", maxHeight: min(360, FitScroll<EmptyView>.screenCap), draft: draft) {
+            // One clock for the list; it ticks only while the bubble is on screen.
+            TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(rows) { r in
+                        if let a = r.agent { agentRow(a, now: ctx.date) } else if let s = r.shell { shellRow(s, now: ctx.date) }
+                    }
+                }
+                .padding(.horizontal, 1)
+            }
+        }
+    }
+
+    private func agentRow(_ a: Subagent, now: Date) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             line(id: a.id, color: a.state.sessionState.color, label: Text(a.label),
-                 kind: a.background ? "\(a.type) · background" : a.type, state: a.state.label, start: a.startedAt, end: a.endedAt,
+                 kind: a.background ? "\(a.type) · background" : a.type, state: a.state.label, start: a.startedAt, end: a.endedAt, now: now,
                  a11y: "subagent \(a.label), \(a.type), \(a.state.label)")
             if let m = a.lastMessage, !a.state.isActive {
                 DisclosureGroup("Show result", isExpanded: Binding(get: { draft.shownResults.contains(a.id) }, set: { on in
@@ -178,34 +200,30 @@ struct ActivityList: View {
         .background(RoundedRectangle(cornerRadius: 6).fill(draft.highlight == a.id ? Color.accentColor.opacity(0.18) : .clear))
     }
 
-    private func shellRow(_ s: Shell) -> some View {
-        line(id: s.id, color: s.state == .running ? .blue : s.state == .finished ? .green : .gray,
-             label: Text(">_ ").font(.system(.body, design: .monospaced).bold()) + Text(s.label),
-             kind: "shell", state: s.state.rawValue, start: s.startedAt, end: s.endedAt,
-             a11y: "background shell \(s.label), \(s.state.rawValue)")
+    private func shellRow(_ s: Shell, now: Date) -> some View {
+        let owner = s.owner.flatMap { session.subagents[$0]?.label }
+        return line(id: s.id, color: s.state == .running ? .blue : s.state == .finished ? .green : .gray,
+                    label: Text(">_ ").font(.system(.body, design: .monospaced).bold()) + Text(s.label),
+                    kind: owner == nil ? "shell" : "shell of this subagent", state: s.state.rawValue, start: s.startedAt, end: s.endedAt, now: now,
+                    a11y: "background shell \(s.label), \(s.state.rawValue)" + (owner.map { ", started by subagent \($0)" } ?? ""))
             .padding(6)
+            .padding(.leading, owner == nil ? 0 : 18)
     }
 
-    private func line(id: String, color: Color, label: Text, kind: String, state: String, start: Date, end: Date?, a11y: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
+    private func line(id: String, color: Color, label: Text, kind: String, state: String, start: Date, end: Date?, now: Date,
+                      a11y: String) -> some View {
+        let took = Self.duration((end ?? now).timeIntervalSince(start))
+        return VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 6) {
                 Circle().fill(color).frame(width: 8, height: 8).accessibilityHidden(true)
                 label.lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 4)
-                Group {
-                    if let end {
-                        Text(Self.duration(end.timeIntervalSince(start)))
-                    } else {
-                        // Ticks only while the bubble is on screen.
-                        TimelineView(.periodic(from: .now, by: 1)) { ctx in Text(Self.duration(ctx.date.timeIntervalSince(start))) }
-                    }
-                }
-                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Text(took).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
             Text("\(kind) · \(state)").font(.caption).foregroundStyle(.secondary).lineLimit(1).padding(.leading, 14)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(a11y)
+        .accessibilityLabel("\(a11y), \(end == nil ? "running for" : "took") \(took)")
     }
 
     static func duration(_ t: TimeInterval) -> String {
@@ -216,22 +234,7 @@ struct ActivityList: View {
     }
 }
 
-extension SessionState {
-    var label: String {
-        switch self {
-        case .starting: "starting"
-        case .working: "working"
-        case .needsPermission: "needs permission"
-        case .asking: "has a question"
-        case .done: "done"
-        case .idle: "idle"
-        case .error: "tool failed"
-        case .ended: "ended"
-        }
-    }
-}
-
-/// Warning line: readable primary text with an orange icon (review A4).
+/// Warning line: readable primary text with an orange icon.
 struct WarningText: View {
     let text: String
     var body: some View {

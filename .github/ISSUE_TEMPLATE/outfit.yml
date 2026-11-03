@@ -1,0 +1,31 @@
+name: New outfit or skin
+description: Suggest a new outfit, palette or look for the buddies.
+labels: [outfit]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Name
+      placeholder: Pirate hat
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options: [Outfit, Palette, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What does it look like? Add a sketch or reference image if you have one.
+    validations:
+      required: true
+  - type: checkboxes
+    id: pr
+    attributes:
+      label: Contribution
+      options:
+        - label: I want to draw it and open a pull request (see CONTRIBUTING.md).

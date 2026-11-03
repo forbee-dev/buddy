@@ -23,9 +23,15 @@ struct MenuContent: View {
                 .help("Opens Settings → Hooks")
             }
             buddies
+            if model.lastDigest != nil {
+                Button("Show last digest") { model.showLastDigest() }
+                    .help("What happened while you were away")
+            }
             Divider()
             Button("Settings…") { SettingsWindow.show(model: model) }.keyboardShortcut(",")
             Button("Welcome…") { OnboardingWindow.show(model: model) }
+            Button("Uninstall Buddy…") { UninstallWindow.show(model: model) }
+                .help("Removes hooks, the extension, the login item, and Buddy's data folder, after you confirm")
             HStack {
                 Button("Quit Buddy") { NSApp.terminate(nil) }.keyboardShortcut("q")
                 Spacer()
@@ -40,7 +46,9 @@ struct MenuContent: View {
     @ViewBuilder private var buddies: some View {
         let sessions = model.menuSessions
         Text("Buddies").font(.headline).accessibilityAddTraits(.isHeader)
-        if let err = model.sheetError { Text(err).foregroundStyle(.red).font(.caption) }
+        if let err = model.sheetError {
+            Label { Text(err) } icon: { Image(systemName: "xmark.octagon.fill").foregroundStyle(.red) }.font(.caption)
+        }
         if sessions.isEmpty { Text("No Claude sessions yet.").foregroundStyle(.secondary) }
         ForEach(sessions) { s in BuddyRow(model: model, session: s) }
     }
@@ -59,7 +67,11 @@ struct BuddyRow: View {
                 HStack(spacing: 8) {
                     thumbnail
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(session.projectName).fontWeight(.medium).lineLimit(1)
+                        HStack(spacing: 4) {
+                            Text(session.projectName).fontWeight(.medium).lineLimit(1)
+                            Spacer(minLength: 4)
+                            if let u = model.usageText(session.id) { Text(u).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+                        }
                         HStack(spacing: 4) {
                             Circle().fill(session.state.color).frame(width: 7, height: 7).accessibilityHidden(true)
                             Text(session.state.label)
@@ -73,7 +85,8 @@ struct BuddyRow: View {
                 }
                 .contentShape(Rectangle())
             }
-            .accessibilityLabel("\(session.projectName), \(session.state.label), \(session.terminal.displayName)\(activity)")
+            .accessibilityLabel("\(session.projectName), \(session.state.label), \(session.terminal.displayName)\(activity)"
+                                + (model.usageText(session.id).map { ", \($0)" } ?? ""))
             .accessibilityHint("Opens this buddy's bubble")
             Menu {
                 Button("Jump to session") { model.jump(session.id) }
@@ -153,13 +166,13 @@ struct PermissionRows: View {
                                   @ViewBuilder extra: () -> Extra = { EmptyView() }) -> some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(name).font(.headline)
+                Text(name).font(.headline).accessibilityAddTraits(.isHeader)
                 Text(why).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if state != .granted { extra() }
             }
             Spacer()
             if state == .granted {
-                Label("Granted", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                Label { Text("Granted") } icon: { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
             } else {
                 Text(state.rawValue).font(.caption).foregroundStyle(.secondary)
                 Button("Request", action: request).accessibilityLabel("Request \(name) permission")

@@ -29,17 +29,17 @@ import Testing
         f.back()
         #expect(f.step == 0)
         #expect(!f.canAdvance)  // nothing picked yet
-        let auto = f.pick(1)
-        #expect(auto)  // single choice, not last: auto-advance
-        #expect(f.canAdvance)
+        f.pick(1)
+        #expect(f.step == 0 && f.canAdvance)  // a pick never moves on by itself
         f.next()
         #expect(f.step == 1)
-        let multi = [f.pick(0), f.pick(1)]
-        #expect(multi == [false, false])  // multi never auto-advances
+        f.pick(0)
+        f.pick(1)
+        #expect(f.step == 1)
         #expect(f.answer(1) == "Pear, Plum")
         f.next()
-        let last = f.pick(0)
-        #expect(f.isLastQuestion && !last)  // last question: no auto-advance
+        f.pick(0)
+        #expect(f.isLastQuestion)
         f.next()
         #expect(f.isReview && f.showsSubmit && f.progress == "Review")
         f.next()
@@ -53,8 +53,7 @@ import Testing
     @Test func singleQuestionHasNoReview() {
         var f = QuestionFlow([AskQuestion(question: "Q", header: nil, options: [.init(label: "A")], multiSelect: false)])
         #expect(!f.hasReview && f.showsSubmit)
-        let auto = f.pick(0)
-        #expect(!auto)  // the only question is the last one
+        f.pick(0)
         f.next()
         #expect(f.step == 0 && !f.isReview && f.complete)
     }
@@ -76,8 +75,10 @@ import Testing
         #expect(f.answer(1) == "Pear, Fig")
         f.pick(2)
         #expect(f.answer(1) == "Pear")
-        let bad = [f.pick(9), f.pick(-1)]
-        #expect(bad == [false, false])
+        let before = f
+        f.pick(9)
+        f.pick(-1)
+        #expect(f == before)  // rows that do not exist change nothing
     }
 
     @Test func completeNeedsUniqueTexts() {
@@ -107,11 +108,14 @@ import Testing
         #expect(QuestionKeys.action(.left, flow: f, textFocused: true) == .ignore)
         #expect(QuestionKeys.action(.space, flow: f, textFocused: true) == .ignore)
         #expect(QuestionKeys.action(.returnKey, flow: f, textFocused: true) == .primary)
-        #expect(QuestionKeys.action(.tab(shift: false), flow: f, textFocused: false) == .next)
-        #expect(QuestionKeys.action(.tab(shift: true), flow: f, textFocused: false) == .back)
+        #expect(QuestionKeys.action(.right, flow: f, textFocused: false) == .next)
+        #expect(QuestionKeys.action(.left, flow: f, textFocused: false) == .back)
         #expect(QuestionKeys.action(.space, flow: f, textFocused: false) == .ignore)  // no row focused yet
         f.moveCursor(1)
         #expect(QuestionKeys.action(.space, flow: f, textFocused: false) == .pick(0))
+        // A focused button or other control keeps Space; arrows still change the question.
+        #expect(QuestionKeys.action(.space, flow: f, textFocused: false, controlFocused: true) == .ignore)
+        #expect(QuestionKeys.action(.right, flow: f, textFocused: false, controlFocused: true) == .next)
         f.moveCursor(10)
         #expect(f.cursor[0] == 2)
         f.go(to: 3)
@@ -121,11 +125,11 @@ import Testing
     // MARK: Transcript tail
 
     static func line(_ type: String, _ content: String) -> String {
-        let c = String(data: try! JSONEncoder().encode(content), encoding: .utf8)!
+        let c = JSONValue.string(content).encoded()
         return #"{"type":"\#(type)","message":{"content":\#(c)}}"#
     }
     static func textLine(_ text: String) -> String {
-        let c = String(data: try! JSONEncoder().encode(text), encoding: .utf8)!
+        let c = JSONValue.string(text).encoded()
         return #"{"type":"assistant","message":{"content":[{"type":"text","text":\#(c)}]}}"#
     }
     static let toolUse = #"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t","name":"AskUserQuestion","input":{}}]}}"#
@@ -144,6 +148,7 @@ import Testing
 
     @Test func mixedLines() throws {
         let home = try Self.home()
+        defer { try? FileManager.default.removeItem(atPath: home) }
         let path = home + "/.claude/s.jsonl"
         try Self.write([Self.line("user", "do it"), Self.textLine("First \u{202E}part."), "not json {",
                         Self.toolResult, Self.toolUse, #"{"type":"progress"}"#], to: path)
@@ -152,6 +157,7 @@ import Testing
 
     @Test func stopsAtUserPromptAndNoAssistant() throws {
         let home = try Self.home()
+        defer { try? FileManager.default.removeItem(atPath: home) }
         let path = home + "/.claude/s.jsonl"
         try Self.write([Self.textLine("Old turn"), Self.line("user", "new prompt"), Self.toolUse], to: path)
         #expect(TranscriptTail.lastAssistantText(path: path, home: home) == nil)
@@ -165,6 +171,7 @@ import Testing
         #expect(TranscriptTail.lastAssistantText(inTail: data, truncatedStart: true) == nil)
         // A real file over 64 KB: only the tail is read, and the cut first line is skipped.
         let home = try Self.home()
+        defer { try? FileManager.default.removeItem(atPath: home) }
         let path = home + "/.claude/big.jsonl"
         try Self.write([Self.textLine(String(repeating: "x", count: 70_000)), Self.textLine("tail text")], to: path)
         #expect(TranscriptTail.lastAssistantText(path: path, home: home) == "tail text")
@@ -174,6 +181,7 @@ import Testing
 
     @Test func capAt300() throws {
         let home = try Self.home()
+        defer { try? FileManager.default.removeItem(atPath: home) }
         let path = home + "/.claude/s.jsonl"
         try Self.write([Self.textLine(String(repeating: "a", count: 500))], to: path)
         let text = try #require(TranscriptTail.lastAssistantText(path: path, home: home))
@@ -182,6 +190,7 @@ import Testing
 
     @Test func pathChecks() throws {
         let home = try Self.home()
+        defer { try? FileManager.default.removeItem(atPath: home) }
         let real = home + "/.claude/s.jsonl"
         try Self.write([Self.textLine("hello")], to: real)
         #expect(TranscriptTail.lastAssistantText(path: real, home: home) == "hello")
@@ -189,6 +198,7 @@ import Testing
         try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: real)
         #expect(TranscriptTail.lastAssistantText(path: link, home: home) == nil)
         let outside = try Self.home()
+        defer { try? FileManager.default.removeItem(atPath: outside) }
         let away = outside + "/.claude/s.jsonl"
         try Self.write([Self.textLine("hello")], to: away)
         #expect(TranscriptTail.lastAssistantText(path: away, home: home) == nil)

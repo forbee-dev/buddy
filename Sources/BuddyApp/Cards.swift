@@ -2,11 +2,23 @@ import AppKit
 import SwiftUI
 import BuddyCore
 
+extension NSPasteboard {
+    /// For text that can hold secrets: clipboard managers skip concealed and transient items (nspasteboard.org).
+    func setConcealed(_ text: String) {
+        clearContents()
+        setString(text, forType: .string)
+        setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+        setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
+    }
+}
+
 /// Monospaced, selectable, scrollable code block with a line count and a copy button. Never truncated.
 struct CodeBox: View {
     let text: String
     let lines: Int
     var accent: Color = .secondary
+    /// Spoken with the label, e.g. "changes files".
+    var risk: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -14,8 +26,7 @@ struct CodeBox: View {
                 Text(lines == 1 ? "1 line" : "\(lines) lines").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
+                    NSPasteboard.general.setConcealed(text)
                     Announcer.say("Copied")
                 } label: { Label("Copy", systemImage: "doc.on.doc").font(.caption) }
                     .buttonStyle(.borderless)
@@ -31,7 +42,7 @@ struct CodeBox: View {
                     .frame(maxWidth: .infinity, alignment: .leading).padding(8)
             }
             .frame(minHeight: 36, maxHeight: 220)
-            .accessibilityLabel("Tool input")
+            .accessibilityLabel(risk.map { "Tool input, \($0)" } ?? "Tool input")
             .accessibilityValue(text)
         }
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
@@ -117,7 +128,8 @@ struct PermissionCard: View {
                 Text(DisplayText.reveal(d)).font(.callout.weight(.medium)).fixedSize(horizontal: false, vertical: true)
                     .accessibilityLabel("Claude says: \(DisplayText.reveal(d))")
             }
-            CodeBox(text: detail.text, lines: detail.lines, accent: risk.color)
+            if risk == .writes { WarningText(text: "Changes files") }
+            CodeBox(text: detail.text, lines: detail.lines, accent: risk.color, risk: risk.label)
             if detail.lines > 10 || detail.chars > 500 {
                 WarningText(text: "\(detail.chars) characters. Scroll to read all of it.")
             }
@@ -161,6 +173,11 @@ struct PermissionCard: View {
         }
         .defaultFocus($focus, true)
         .onChange(of: pending.id, initial: true) { draft.reset(for: pending.id) }
+        .onChange(of: draft.armed) { _, armed in
+            guard armed, draft.readyFor != pending.id else { return }
+            draft.readyFor = pending.id
+            Announcer.say("Ready")
+        }
         .loadsContext(model, session, pending.id, draft)
     }
 
@@ -176,6 +193,14 @@ extension PermissionDisplay.Risk {
         case .readOnly: .secondary
         }
     }
+
+    var label: String {
+        switch self {
+        case .sandboxOff: "runs outside the sandbox"
+        case .writes: "changes files"
+        case .readOnly: "reads only"
+        }
+    }
 }
 
 /// Full-width option row: hover, pressed, and selected states that read in light and dark mode.
@@ -183,6 +208,8 @@ struct OptionRowStyle: ButtonStyle {
     let selected: Bool
     let hovered: Bool
     let focused: Bool
+    /// Increase Contrast: a full-opacity cursor stroke.
+    var highContrast = false
 
     func makeBody(configuration: Configuration) -> some View {
         let fill: Color = selected ? Color.accentColor.opacity(configuration.isPressed ? 0.28 : 0.16)
@@ -190,7 +217,7 @@ struct OptionRowStyle: ButtonStyle {
         configuration.label
             .background(RoundedRectangle(cornerRadius: 10).fill(fill))
             .overlay(RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(selected ? Color.accentColor : focused ? Color.accentColor.opacity(0.6) : Color.primary.opacity(0.12),
+                .strokeBorder(selected ? Color.accentColor : focused ? Color.accentColor.opacity(highContrast ? 1 : 0.6) : Color.primary.opacity(0.12),
                               lineWidth: selected || focused ? 1.5 : 1))
             .contentShape(RoundedRectangle(cornerRadius: 10))
     }
@@ -203,8 +230,10 @@ struct QuestionCard: View {
     let questions: [AskQuestion]
     @Bindable var draft: BubbleSelection
     @FocusState private var otherFocused: Bool
+    @Environment(\.colorSchemeContrast) private var contrast
 
     private var flow: QuestionFlow { draft.flow }
+    private var highContrast: Bool { contrast == .increased }
 
     /// Preview panel beside the options; below them when the screen is narrow.
     static func previewBeside(_ flow: QuestionFlow) -> Bool {
@@ -223,7 +252,7 @@ struct QuestionCard: View {
         }
         .onChange(of: pending.id, initial: true) {
             draft.reset(for: pending.id, questions: questions)
-            draft.onKey = { [self] key, textFocused in handle(key, textFocused: textFocused) }
+            draft.onKey = { [self] key, textFocused, controlFocused in handle(key, textFocused: textFocused, controlFocused: controlFocused) }
         }
         .onChange(of: draft.flow.step) { _, _ in
             draft.hovered = nil
@@ -237,27 +266,31 @@ struct QuestionCard: View {
     // MARK: Parts
 
     private var tabs: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(Array(questions.enumerated()), id: \.offset) { i, q in
-                    let current = flow.step == i
-                    let title = q.header.map { DisplayText.reveal($0) } ?? "Q\(i + 1)"
-                    Button { draft.flow.go(to: i) } label: {
-                        HStack(spacing: 4) {
-                            if flow.answered(i) { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
-                            Text(title).lineLimit(1)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(questions.enumerated()), id: \.offset) { i, q in
+                        let current = flow.step == i
+                        let title = q.header.map { DisplayText.reveal($0) } ?? "Q\(i + 1)"
+                        Button { draft.flow.go(to: i) } label: {
+                            HStack(spacing: 4) {
+                                if flow.answered(i) { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
+                                Text(title).lineLimit(1)
+                            }
+                            .font(.caption.weight(.medium))
+                            .padding(.horizontal, 9).padding(.vertical, 4)
+                            .background(Capsule().fill(current ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.06)))
+                            .overlay(Capsule().strokeBorder(current ? Color.accentColor : .clear))
+                            .contentShape(Capsule())
                         }
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 9).padding(.vertical, 4)
-                        .background(Capsule().fill(current ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.06)))
-                        .overlay(Capsule().strokeBorder(current ? Color.accentColor : .clear))
-                        .contentShape(Capsule())
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Question \(i + 1): \(title), \(flow.answered(i) ? "answered" : "not answered")")
+                        .accessibilityAddTraits(current ? .isSelected : [])
+                        .id(i)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Question \(i + 1): \(title), \(flow.answered(i) ? "answered" : "not answered")")
-                    .accessibilityAddTraits(current ? .isSelected : [])
                 }
             }
+            .onChange(of: flow.step) { _, step in proxy.scrollTo(min(step, questions.count - 1)) }
         }
     }
 
@@ -300,13 +333,21 @@ struct QuestionCard: View {
             }
             .padding(10)
         }
-        .buttonStyle(OptionRowStyle(selected: selected, hovered: draft.hovered == r, focused: flow.cursor[flow.step] == r))
+        .buttonStyle(OptionRowStyle(selected: selected, hovered: draft.hovered == r, focused: flow.cursor[flow.step] == r,
+                                    highContrast: highContrast))
         .onHover { inside in
             if inside { draft.hovered = r } else if draft.hovered == r { draft.hovered = nil }
         }
         .accessibilityLabel(desc.map { "\(label). \($0)" } ?? label)
         .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityHint(r < 9 ? "Option \(r + 1). Press \(r + 1) to choose." : "")
+        .accessibilityHint(optionHint(r, rows: q.options.count + 1, multi: q.multiSelect))
+    }
+
+    /// What picking does: it never moves to the next question by itself.
+    private func optionHint(_ r: Int, rows: Int, multi: Bool) -> String {
+        let key = r < 9 ? " Press \(r + 1)." : ""
+        let action = multi ? "Picking adds or removes it." : "Picking selects it. Return or Next goes on."
+        return "Option \(r + 1) of \(rows).\(key) \(action)"
     }
 
     @ViewBuilder private func otherRow(_ q: AskQuestion) -> some View {
@@ -320,11 +361,13 @@ struct QuestionCard: View {
             }
             .padding(10)
         }
-        .buttonStyle(OptionRowStyle(selected: on, hovered: draft.hovered == r, focused: flow.cursor[flow.step] == r))
+        .buttonStyle(OptionRowStyle(selected: on, hovered: draft.hovered == r, focused: flow.cursor[flow.step] == r,
+                                    highContrast: highContrast))
         .onHover { inside in
             if inside { draft.hovered = r } else if draft.hovered == r { draft.hovered = nil }
         }
         .accessibilityLabel("Other answer")
+        .accessibilityHint(optionHint(r, rows: r + 1, multi: q.multiSelect) + " Shows a field for your answer.")
         .accessibilityAddTraits(on ? .isSelected : [])
         if on {
             TextField("Type your answer", text: Binding(get: { draft.flow.others[flow.step] ?? "" },
@@ -347,7 +390,7 @@ struct QuestionCard: View {
 
     private func mark(selected: Bool, multi: Bool) -> some View {
         Image(systemName: multi ? (selected ? "checkmark.square.fill" : "square") : (selected ? "checkmark.circle.fill" : "circle"))
-            .foregroundStyle(selected ? Color.accentColor : Color.secondary.opacity(0.6))
+            .foregroundStyle(selected ? Color.accentColor : highContrast ? Color.primary : Color.secondary.opacity(0.6))
             .font(.title3)
             .accessibilityHidden(true)
     }
@@ -416,6 +459,7 @@ struct QuestionCard: View {
         HStack {
             if flow.count > 1 {
                 Button("‹ Back") { draft.flow.back() }.disabled(flow.step == 0).help("Back (←)")
+                    .accessibilityLabel("Back")
                 Spacer()
             }
             Button("Answer in \(session.answerPlace)") { model.deferToTerminal(session.id, requestId: pending.id) }
@@ -430,7 +474,8 @@ struct QuestionCard: View {
                     .accessibilityHint(flow.complete ? (draft.armed ? "" : armHint) : "Answer every question first")
             } else {
                 Button(flow.isLastQuestion ? "Review" : "Next ›") { draft.flow.next() }
-                    .disabled(!flow.canAdvance).help("Next (Return)")
+                    .disabled(!flow.canAdvance).help("Next (Return or →)")
+                    .accessibilityLabel(flow.isLastQuestion ? "Review" : "Next")
                     .accessibilityHint(flow.canAdvance ? "" : "Answer this question first")
             }
         }
@@ -438,16 +483,10 @@ struct QuestionCard: View {
 
     // MARK: Actions
 
-    /// Single choice moves on by itself after a short beat, except on the last question.
+    /// Picks only; Return, →, or Next moves on, so a pick never changes the question under the user.
     private func choose(_ row: Int) {
         let step = flow.step
-        if draft.flow.pick(row) {
-            let request = pending.id
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(150))
-                if draft.requestId == request, draft.flow.step == step { draft.flow.next() }
-            }
-        }
+        draft.flow.pick(row)
         if row == flow.current?.options.count, flow.otherOn.contains(step) {
             Task { @MainActor in otherFocused = true }
         }
@@ -458,13 +497,18 @@ struct QuestionCard: View {
         model.answer(session.id, requestId: pending.id, output: HookOutput.answer(toolInput: pending.toolInput, answers: draft.flow.answers))
     }
 
-    private func handle(_ key: QuestionKey, textFocused: Bool) -> Bool {
+    private func handle(_ key: QuestionKey, textFocused: Bool, controlFocused: Bool) -> Bool {
         guard model.session(session.id)?.pending?.id == pending.id, draft.requestId == pending.id else { return false }
-        switch QuestionKeys.action(key, flow: draft.flow, textFocused: textFocused) {
+        switch QuestionKeys.action(key, flow: draft.flow, textFocused: textFocused, controlFocused: controlFocused) {
         case .pick(let r): choose(r)
         case .back: draft.flow.back()
         case .next: draft.flow.next()
-        case .cursor(let d): draft.flow.moveCursor(d)
+        case .cursor(let d):
+            draft.flow.moveCursor(d)
+            if let q = draft.flow.current, let r = draft.flow.cursor[draft.flow.step] {
+                let label = r < q.options.count ? DisplayText.reveal(q.options[r].label) : "Other answer"
+                Announcer.say("\(label), option \(r + 1) of \(q.options.count + 1)")
+            }
         case .primary:
             if draft.flow.showsSubmit { submit() } else if draft.flow.canAdvance { draft.flow.next() }
             if textFocused { otherFocused = false }
@@ -497,18 +541,13 @@ struct DoneCard: View {
                     Button(draft.expanded ? "Show less" : "Show more") { draft.expanded.toggle() }.buttonStyle(.link).font(.callout)
                 }
             }
-            ZStack(alignment: .topLeading) {
-                TextEditor(text: $draft.prompt)
-                    .font(.body)
-                    .scrollContentBackground(.hidden)
-                    .focused($promptFocused)
-                    .disabled(route == .none)
-                    .accessibilityLabel("Next prompt")
-                if draft.prompt.isEmpty {
-                    Text("Next prompt").foregroundStyle(.tertiary).padding(.leading, 5).allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
-            }
+            Text("Next prompt").font(.caption.weight(.semibold)).foregroundStyle(.secondary).accessibilityHidden(true)
+            TextEditor(text: $draft.prompt)
+                .font(.body)
+                .scrollContentBackground(.hidden)
+                .focused($promptFocused)
+                .disabled(route == .none)
+                .accessibilityLabel("Next prompt")
             .frame(height: 64)
             .padding(6)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
@@ -517,7 +556,7 @@ struct DoneCard: View {
                 if desktopHeld || (session.terminal == .claudeDesktop && route == .none) {
                     WarningText(text: "Answer in Claude Desktop: Buddy cannot deliver a prompt to this session.")
                 } else {
-                    Text(routeText(route)).font(.caption).foregroundStyle(.secondary)
+                    Text(session.remote != nil ? PromptGuard.remoteRefusal : routeText(route)).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("Send", action: send)

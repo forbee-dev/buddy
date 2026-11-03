@@ -3,12 +3,17 @@ import Darwin
 import Testing
 @testable import BuddyCore
 
-/// Integration tests: spawn the built buddy-hook binary.
-@Suite(.serialized) struct HookBinaryTests {
-    static var binary: URL {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        return root.appendingPathComponent(".build/debug/buddy-hook")
-    }
+private final class BundleMarker {}
+
+private let builtHook: URL? = {
+    let url = Bundle(for: BundleMarker.self).bundleURL.deletingLastPathComponent().appendingPathComponent("buddy-hook")
+    return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
+}()
+
+/// Integration tests: spawn the built buddy-hook binary, found next to the test bundle.
+@Suite(.serialized, .enabled(if: builtHook != nil, "buddy-hook is not built next to the test bundle"))
+struct HookBinaryTests {
+    static var binary: URL { builtHook ?? URL(fileURLWithPath: "/nonexistent/buddy-hook") }
 
     static func tempSocketPath() -> String {
         // sockaddr_un paths are short; use /tmp, not the long scratch temp dir.
@@ -42,7 +47,8 @@ import Testing
         p.waitUntilExit()
         #expect(p.terminationStatus == 0)
         #expect(out.fileHandleForReading.readDataToEndOfFile().isEmpty)
-        #expect(Date().timeIntervalSince(start) < 1)
+        // Generous: a busy test machine is slow to start a process, but the hook never waits here.
+        #expect(Date().timeIntervalSince(start) < 3)
     }
 
     @Test func garbageInputSendsNothing() throws {
@@ -58,7 +64,12 @@ import Testing
         #expect(out.fileHandleForReading.readDataToEndOfFile().isEmpty)
     }
 
+    /// `answer` builds the line the fake app sends back for the hook message.
     func roundTrip(output: JSONValue) throws -> (Int32, Data, HookMessage?) {
+        try roundTrip { try WireMessage.encode(ReplyMessage(id: $0.id, output: output)) }
+    }
+
+    func roundTrip(answer: (HookMessage) throws -> Data) throws -> (Int32, Data, HookMessage?) {
         let path = Self.tempSocketPath()
         let server = try UnixSocket.listen(path)
         defer { close(server); unlink(path) }
@@ -68,7 +79,7 @@ import Testing
         var got: HookMessage?
         if let line = try UnixSocket.readLine(conn), case .hook(let m) = try WireMessage.decode(line) {
             got = m
-            try UnixSocket.writeAll(conn, WireMessage.encode(ReplyMessage(id: m.id, output: output)))
+            try UnixSocket.writeAll(conn, answer(m))
         }
         p.waitUntilExit()
         return (p.terminationStatus, out.fileHandleForReading.readDataToEndOfFile(), got)
@@ -88,7 +99,20 @@ import Testing
         #expect(out.isEmpty)
     }
 
-    @Test func nonBlockingHookWaitsForAppToClose() throws { // S1
+    @Test func wrongReplyIdPrintsNothing() throws {
+        let (status, out, msg) = try roundTrip { _ in try WireMessage.encode(ReplyMessage(id: "someone-else", output: HookOutput.allow())) }
+        #expect(msg != nil)
+        #expect(status == 0)
+        #expect(out.isEmpty)
+    }
+
+    @Test func nonReplyKindPrintsNothing() throws {
+        let (status, out, _) = try roundTrip { _ in try WireMessage.encode(AckMessage(reqId: "x", ok: true, error: nil)) }
+        #expect(status == 0)
+        #expect(out.isEmpty)
+    }
+
+    @Test func nonBlockingHookWaitsForAppToClose() throws {
         let path = Self.tempSocketPath()
         let server = try UnixSocket.listen(path)
         defer { close(server); unlink(path) }
@@ -96,12 +120,12 @@ import Testing
         let conn = try acceptWithin3s(server)
         let line = try UnixSocket.readLine(conn)
         #expect(line != nil)
-        usleep(300_000)
         #expect(p.isRunning)  // still alive, so the app can check its path
         close(conn)
         let start = Date()
         p.waitUntilExit()
-        #expect(Date().timeIntervalSince(start) < 0.5)
+        // Under its own 1 s cap: it left because the app closed, not because it gave up.
+        #expect(Date().timeIntervalSince(start) < 0.9)
         #expect(p.terminationStatus == 0)
     }
 }

@@ -1,7 +1,7 @@
 import SwiftUI
 import BuddyCore
 
-enum SettingsTab: String { case general, size, notifications, hooks, permissions, about }
+enum SettingsTab: String { case general, size, notifications, hooks, ssh, permissions, skins, diagnostics, about }
 
 /// Selected tab, outside the view so a launch argument or a menu item can pick it.
 @MainActor
@@ -21,10 +21,13 @@ struct SettingsView: View {
             SizeTab(model: model).tabItem { Label("Size", systemImage: "arrow.up.left.and.arrow.down.right") }.tag(SettingsTab.size)
             NotificationsTab(model: model).tabItem { Label("Notifications", systemImage: "bell") }.tag(SettingsTab.notifications)
             HooksTab(model: model).tabItem { Label("Hooks & Extension", systemImage: "link") }.tag(SettingsTab.hooks)
+            SSHTab(model: model).tabItem { Label("SSH", systemImage: "network") }.tag(SettingsTab.ssh)
             PermissionRows().padding(20).tabItem { Label("Permissions", systemImage: "lock") }.tag(SettingsTab.permissions)
+            SkinsTab(model: model).tabItem { Label("Skins", systemImage: "paintpalette") }.tag(SettingsTab.skins)
+            DiagnosticsTab(model: model).tabItem { Label("Diagnostics", systemImage: "stethoscope") }.tag(SettingsTab.diagnostics)
             AboutTab().tabItem { Label("About", systemImage: "info.circle") }.tag(SettingsTab.about)
         }
-        .frame(width: 520, height: 420)
+        .frame(width: 760, height: 440)
     }
 }
 
@@ -49,11 +52,42 @@ private struct GeneralTab: View {
             Toggle("Sleeping buddy when no sessions", isOn: $model.sleepMascot)
             Toggle("Show subagents as minis", isOn: $model.showMinis)
             Toggle("Show background shells", isOn: $model.showShells)
+            Picker("Character", selection: Binding(get: { model.character == AppModel.mix ? AppModel.mix : model.characters.first ?? "clawd" },
+                                                   set: { model.character = $0 })) {
+                ForEach(model.sheet?.baseNames ?? ["clawd"], id: \.self) { Text(model.characterLabel($0)).tag($0) }
+                Text("Mix").tag(AppModel.mix)
+            }
+            .help("The buddy character. Mix gives each session one of all enabled characters. Turn on skins in Settings → Skins.")
+            Picker("Get impatient after", selection: $model.escalateMinutes) {
+                Text("Off").tag(0)
+                ForEach([1, 3, 5, 10], id: \.self) { Text("\($0) min").tag($0) }
+            }
+            .help("A buddy that waits on you longer hops and shows a timer. At twice the time it grows and sends one reminder.")
+            Picker("While you were away", selection: $model.awayMinutes) {
+                Text("Off").tag(0)
+                ForEach([5, 10, 30], id: \.self) { Text("\($0) min").tag($0) }
+            }
+            .help("After this much time away, one buddy tells you what happened.")
+            Toggle("Fun extras", isOn: $model.funExtras)
+            Text("High-fives, a party when all sessions finish, and rare tips. Reduce Motion turns off the moving ones.")
+                .font(.caption).foregroundStyle(.secondary)
+            Toggle("Show tokens and cost", isOn: $model.showUsage)
+            HStack {
+                Text(model.pricesError ?? "Prices come from prices.json. Placeholders: check them for your plan.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                Button("Edit prices…") { NSWorkspace.shared.open(URL(fileURLWithPath: model.pricesPath)) }
+                    .help("Opens prices.json. Buddy reads it at start.")
+            }
             Toggle("Start Buddy at login", isOn: Binding(get: { services.launchAtLogin }, set: { services.setLaunchAtLogin($0) }))
             Picker("Open newest card", selection: $model.hotkey) {
                 ForEach(HotkeyChoice.allCases) { Text($0.label).tag($0) }
             }
             .help("Global shortcut that opens the newest permission or question card")
+            Picker("Open command palette", selection: $model.paletteHotkey) {
+                ForEach(HotkeyChoice.allCases) { Text($0.label).tag($0) }
+            }
+            .help("Global shortcut for the session list. Picking the other shortcut's key swaps the two.")
             if let m = services.message { Text(m).font(.caption) }
         }
         .formStyle(.grouped)
@@ -105,10 +139,13 @@ private struct NotificationsTab: View {
     @Bindable var model: AppModel
     var body: some View {
         Form {
-            Text("Notify me when").font(.headline)
+            Text("Notify me when").font(.headline).accessibilityAddTraits(.isHeader)
             Toggle("Claude needs permission", isOn: $model.notifyPermission)
             Toggle("Claude asks a question", isOn: $model.notifyQuestion)
             Toggle("Claude finishes", isOn: $model.notifyDone)
+            Toggle("Allow answering from notifications", isOn: $model.notifyActions)
+            Text("Adds Deny and Review… to permission alerts, Answer… to questions, and Reply… to finished sessions. Allow is only on the card, where you see the whole request: Review… opens it. Deny and Reply… need an unlocked Mac. Alerts show the tool and the project, never the command.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .formStyle(.grouped)
     }
@@ -126,6 +163,7 @@ struct HooksSection: View {
                 Button("Move to Applications") { services.moveToApplications() }
             }
             Text("Claude Code hooks: \(model.hooksInstalled ? "installed" : "not installed")").font(.headline)
+                .accessibilityAddTraits(.isHeader)
             if model.hooksOutdated { WarningText(text: "New hook events available: click Install hooks.") }
             HStack {
                 Button("Install hooks") { model.installHooks(true) }.disabled(model.hooksInstalled)
@@ -133,7 +171,7 @@ struct HooksSection: View {
             }
             if let m = model.installMessage { Text(m).font(.caption).fixedSize(horizontal: false, vertical: true) }
             Divider()
-            Text("VS Code / Cursor extension").font(.headline)
+            Text("VS Code / Cursor extension").font(.headline).accessibilityAddTraits(.isHeader)
             Text("Lets Buddy type your next prompt into the right editor terminal.").font(.callout).foregroundStyle(.secondary)
             if services.bundledExtension == nil {
                 Text("This build has no bundled extension.").font(.caption).foregroundStyle(.secondary)
@@ -156,6 +194,53 @@ struct HooksSection: View {
 private struct HooksTab: View {
     let model: AppModel
     var body: some View { ScrollView { HooksSection(model: model).padding(20).frame(maxWidth: .infinity, alignment: .leading) } }
+}
+
+private struct SkinsTab: View {
+    let model: AppModel
+    let skins = SkinStore.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Skins add palettes, outfits, and characters. Built-in looks never change. See docs/SKINS.md for the format.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            List(skins.entries) { e in row(e) }
+                .frame(minHeight: 200)
+                .accessibilityLabel("Skins")
+            HStack {
+                Button("Open skins folder") { skins.openFolder() }
+                Button("Reload") { skins.reload() }
+                Spacer()
+                Text("\(skins.enabled.count) on").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(20)
+    }
+
+    @ViewBuilder private func row(_ e: SkinStore.Entry) -> some View {
+        if let skin = e.skin {
+            Toggle(isOn: Binding(get: { skins.isOn(e) }, set: { skins.setOn(e, $0) })) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(skin.name + (e.bundled ? " (example)" : "")).fontWeight(.medium)
+                    Text(summary(skin)).font(.caption).foregroundStyle(.secondary)
+                    if let why = skins.conflicts[e.id] { WarningText(text: "Not applied: \(why)") }
+                }
+            }
+            .accessibilityLabel("\(skin.name), \(summary(skin))" + (skins.conflicts[e.id].map { ", not applied: \($0)" } ?? ""))
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(e.file).fontWeight(.medium)
+                WarningText(text: "Not loaded: \(e.error ?? "unknown error")")
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func summary(_ s: Skin) -> String {
+        let parts = [(s.bases.count, "character"), (s.outfits.count, "outfit"), (s.palettes.count, "palette")]
+            .filter { $0.0 > 0 }.map { "\($0.0) \($0.1)\($0.0 == 1 ? "" : "s")" }
+        return ([s.author.map { "by \($0)" }].compactMap { $0 } + parts).joined(separator: " · ")
+    }
 }
 
 private struct AboutTab: View {

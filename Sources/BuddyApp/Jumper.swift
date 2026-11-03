@@ -7,9 +7,10 @@ import BuddyCore
 enum Jumper {
     static let windowNote = "Jump could not find the window. Grant Accessibility for exact window focus."
 
-    /// Returns a note for the bubble when the right window could not be raised.
+    /// Returns a note for the bubble when the right window could not be raised. AppleScript and AX calls run off main.
     @discardableResult
-    static func jump(to s: Session, ext: ExtensionHub) -> String? {
+    static func jump(to s: Session, ext: ExtensionHub, ticket: JumpTicket, current: @MainActor () -> Int) async -> String? {
+        func fresh() -> Bool { ticket.isCurrent(jumpGenerationNow: current()) }
         let app = s.terminal == .claudeDesktop
             ? NSRunningApplication.runningApplications(withBundleIdentifier: TerminalApp.desktopBundleId).first
             : s.env.claudePid.flatMap(terminalApp(above:))
@@ -17,7 +18,8 @@ enum Jumper {
         switch s.terminal {
         case .vscode, .cursor:
             let pick = ext.jumpTarget(shellPid: s.env.shellPid, cwd: s.cwd)
-            let raised = raiseEditorWindow(app: app, terminal: s.terminal, pick: pick, projectName: s.projectName)
+            let raised = await raiseEditorWindow(app: app, terminal: s.terminal, pick: pick, projectName: s.projectName, fresh: fresh)
+            guard fresh() else { return nil }
             if let shell = s.env.shellPid, ext.hasTerminal(shellPid: shell) {
                 log.info("Jump: route=extension-focus")
                 ext.focus(shellPid: shell)
@@ -25,13 +27,17 @@ enum Jumper {
             return raised ? nil : windowNote
         case .iterm:
             activate(app)
-            if let tty = s.env.tty { runScript(itermScript(tty: tty)) }
+            if let tty = s.env.tty { await runScript(itermScript(tty: tty), fresh: fresh) }
         case .terminal:
             activate(app)
-            if let tty = s.env.tty { runScript(terminalScript(tty: tty)) }
+            if let tty = s.env.tty { await runScript(terminalScript(tty: tty), fresh: fresh) }
         case .other:
             activate(app)
-            if let app { raiseWindow(pid: app.processIdentifier, titleContains: s.projectName) }
+            if let pid = app?.processIdentifier {
+                let name = s.projectName
+                guard fresh() else { return nil }
+                _ = await Task.detached { raiseWindow(pid: pid, titleContains: name) }.value
+            }
         case .claudeDesktop: activate(app)  // no per-session link: Desktop comes forward, the user picks the session
         }
         return nil
@@ -44,15 +50,17 @@ enum Jumper {
     }
 
     /// Raises the window of `pick.folder` without activating the app first: activation shows the wrong window.
-    private static func raiseEditorWindow(app: NSRunningApplication?, terminal: TerminalApp, pick: JumpTarget.Pick, projectName: String) -> Bool {
+    private static func raiseEditorWindow(app: NSRunningApplication?, terminal: TerminalApp, pick: JumpTarget.Pick, projectName: String, fresh: @MainActor () -> Bool) async -> Bool {
         let trusted = AXIsProcessTrusted()
         log.info("Jump: route=editor-window ax-trusted=\(trusted ? "yes" : "no", privacy: .public) folder-known=\(pick.isOpen ? "yes" : "no", privacy: .public)")
         if trusted, let app {
             let folderName = (pick.folder as NSString).lastPathComponent
-            let matched = [folderName, projectName].filter { !$0.isEmpty }.contains {
-                raiseWindow(pid: app.processIdentifier, titleContains: $0)
-            }
+            let names = [folderName, projectName].filter { !$0.isEmpty }
+            let pid = app.processIdentifier
+            guard fresh() else { return true }
+            let matched = await Task.detached { names.contains { raiseWindow(pid: pid, titleContains: $0) } }.value
             log.info("Jump: title-matched=\(matched ? "yes" : "no", privacy: .public)")
+            guard fresh() else { return true }
             if matched { activate(app); return true }
         }
         if pick.isOpen {
@@ -130,16 +138,19 @@ enum Jumper {
         """
     }
 
-    static func runScript(_ source: String) {
-        var error: NSDictionary?
-        NSAppleScript(source: source)?.executeAndReturnError(&error)
-        if let error { log.error("Jump AppleScript failed: \(error[NSAppleScript.errorNumber] as? Int ?? 0)") }
+    /// The same script text through osascript, so a slow or hung terminal app never blocks the main thread.
+    static func runScript(_ source: String, fresh: @MainActor () -> Bool) async {
+        guard fresh() else { return }
+        let (status, _) = await AppServices.run("/usr/bin/osascript", ["-e", source], timeout: 5)
+        if status != 0 { log.error("Jump AppleScript failed: exit \(status)") }
     }
 
+    /// Off main: an app that does not answer AX costs at most 1 s per call.
     @discardableResult
-    static func raiseWindow(pid: Int32, titleContains name: String) -> Bool {
+    nonisolated static func raiseWindow(pid: Int32, titleContains name: String) -> Bool {
         guard AXIsProcessTrusted() else { log.info("Jump: Accessibility not granted"); return false }
         let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 1)
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
               let windows = value as? [AXUIElement] else { return false }

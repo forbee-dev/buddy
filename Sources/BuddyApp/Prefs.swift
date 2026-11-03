@@ -24,14 +24,19 @@ enum Arrangement: String, CaseIterable, Identifiable {
 enum PrefKey {
     static let mode = "mode", walking = "walking", scale = "scale", sleepMascot = "sleepMascot"
     static let notifyPermission = "notify.permission", notifyQuestion = "notify.question", notifyDone = "notify.done"
-    static let onboarded = "onboarded", looks = "lookOverrides", hotkey = "hotkey"
+    static let notifyActions = "notify.actions"
+    static let onboarded = "onboarded", looks = "lookOverrides", hotkey = "hotkey", paletteHotkey = "hotkey.palette"
     static let size = "size", buddiesHidden = "buddiesHidden", arrangement = "arrangement"
     static let showMinis = "minis.show", showShells = "minis.shells"
+    static let escalateMinutes = "escalate.minutes", awayMinutes = "away.minutes", funExtras = "fun.extras"
+    static let showUsage = "usage.show", skinsEnabled = "skins.enabled", character = "character"
+    static let sshEnabled = "ssh.enabled", sshClients = "ssh.clients"
     static func anchor(_ a: Arrangement) -> String { "groupAnchor.\(a.rawValue)" }
 }
 
 extension UserDefaults {
     func bool(_ key: String, default value: Bool) -> Bool { object(forKey: key) == nil ? value : bool(forKey: key) }
+    func int(_ key: String, default value: Int) -> Int { object(forKey: key) == nil ? value : integer(forKey: key) }
 
     func groupAnchor(_ a: Arrangement) -> CGPoint? {
         guard let v = array(forKey: PrefKey.anchor(a)) as? [Double], v.count == 2, v.allSatisfy(\.isFinite) else { return nil }

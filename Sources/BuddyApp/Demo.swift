@@ -4,11 +4,18 @@ import BuddyCore
 
 /// `--demo-cards`: fake sessions and requests for a visual check of every card. DEBUG builds only.
 /// `--demo-activity`: one session with subagents and background shells (minis, Activity tab, subagent card).
-/// `--demo-appearance=light|dark` forces the appearance.
+/// `--demo-palette` (or `=card`, with the first card open), `--demo-diagnostics`, `--demo-uninstall`: the card sessions
+/// plus that window. `--demo-appearance=light|dark` forces the appearance.
+/// `--demo-wave2`: impatience level 2, a high-five pair (repeats), a tip, tokens and cost on the Activity tab.
+/// `--demo-away`: the "while you were away" digest. `--demo-mix`: Character → Mix with Crate, and a skin outfit.
+/// `--demo-ssh` (or `=diagnostics`): one SSH session (`devbox:api`), two local buddies dragged close (tag overlap fix),
+/// and Settings → SSH (or Diagnostics). `--demo-idle`: no sessions, only the sleeping buddy (idle CPU check).
 @MainActor
 enum Demo {
     static let activity = CommandLine.arguments.contains("--demo-activity")
-    static let on = activity || CommandLine.arguments.contains("--demo-cards")
+    static func arg(_ name: String) -> String? { CommandLine.arguments.first { $0 == name || $0.hasPrefix(name + "=") } }
+    static let on = activity || ["--demo-cards", "--demo-palette", "--demo-diagnostics", "--demo-uninstall", "--demo-wave2", "--demo-away",
+                                 "--demo-mix", "--demo-ssh", "--demo-idle"].contains { arg($0) != nil }
     /// Card state per demo request id, so the screenshots show more than the first step.
     static let presets: [String: (inout QuestionFlow) -> Void] = [
         "review-PermissionRequest": { f in
@@ -24,7 +31,12 @@ enum Demo {
             NSApp.appearance = NSAppearance(named: arg.hasSuffix("dark") ? .darkAqua : .aqua)
         }
         model.walking = false  // a moving card stays disarmed; the debug build has its own defaults domain
+        if arg("--demo-idle") != nil { model.sleepMascot = true; return }
         if activity { startActivity(model: model); return }
+        if arg("--demo-wave2") != nil { startWave2(model: model); return }
+        if arg("--demo-away") != nil { startAway(model: model); return }
+        if arg("--demo-mix") != nil { startMix(model: model); return }
+        if arg("--demo-ssh") != nil { startSSH(model: model); return }
         let transcript = writeTranscript()
         let env = HookEnv(termProgram: "iTerm.app", attended: "1")
         func send(_ sid: String, _ event: String, _ extra: [String: JSONValue]) {
@@ -62,6 +74,26 @@ enum Demo {
         See [the docs](https://example.com) for the new names. The build is green and nothing else changed. \
         I did not touch the release scripts or the signing setup. Next step: run the app once and check the settings window.
         """)])
+        if let p = arg("--demo-palette") {
+            PaletteController.shared.show(model: model)
+            if p.hasSuffix("=card") { PaletteController.shared.demoOpenFirst(model: model) }
+            return
+        }
+        if arg("--demo-diagnostics") != nil {
+            model.extClients = [("vscode", "0.1.3"), ("vscode", "0.1.3"), ("cursor", "0.1.2")]
+            model.claudeVersions = ["2.1.309", "2.1.317"]
+            model.record("infra", "PermissionRequest", "Bash", "replied deny")
+            model.record("docs", "PermissionRequest", "Read", "replied allow")
+            model.record("api", "PermissionRequest", "AskUserQuestion", "deferred to terminal")
+            model.record("notes", "NextPrompt", nil, "sent via editor")
+            SettingsWindow.show(model: model, tab: .diagnostics)
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                FileHandle.standardOutput.write(Data(Diagnostics.shared.report(model).utf8))
+            }
+            return
+        }
+        if arg("--demo-uninstall") != nil { UninstallWindow.show(model: model); return }
         // Never focus: a key bubble would take keystrokes meant for the app in front.
         for c in model.director?.controllers.values ?? [:].values { c.showBubble(focus: false) }
     }
@@ -100,6 +132,127 @@ enum Demo {
             send("SubagentStop", agent: "a3", ["last_assistant_message": .string("Found 4 unused images in `Assets/legacy`. Nothing else references them.")])
             try? await Task.sleep(for: .seconds(4))
             model.director?.openActivity(sessionId: "demo", highlight: "a1", focus: false)
+        }
+    }
+
+    /// Sends one demo hook event; `ago` moves its time into the past.
+    private static func event(_ model: AppModel, _ sid: String, _ name: String, ago: TimeInterval = 0, _ extra: [String: JSONValue] = [:]) {
+        var p: [String: JSONValue] = ["session_id": .string(sid), "hook_event_name": .string(name), "cwd": .string("/Users/demo/\(sid)")]
+        p.merge(extra) { $1 }
+        counter += 1
+        model.applyDemo(HookMessage(id: "\(sid)-\(name)-\(counter)", wantsReply: name == "PermissionRequest", payload: .object(p),
+                                    env: HookEnv(termProgram: "iTerm.app", attended: "1")), now: Date().addingTimeInterval(-ago))
+    }
+    private static var counter = 0
+
+    /// A transcript with assistant usage lines (repeated ids, as Claude Code writes them) and one subagent file.
+    private static func usageTranscript(_ name: String, scale: Int) -> JSONValue {
+        let dir = FileManager.default.currentDirectoryPath + "/.build/demo/usage"
+        let path = "\(dir)/\(name).jsonl"
+        func line(_ id: String, _ model: String, _ n: Int) -> String {
+            #"{"type":"assistant","message":{"id":"\#(id)","model":"\#(model)","usage":{"input_tokens":\#(n / 50),"output_tokens":\#(n / 6),"cache_creation_input_tokens":\#(n / 3),"cache_read_input_tokens":\#(n)}}}"#
+        }
+        let main = (1...6).flatMap { i in [line("m\(i)", "claude-opus-5-5", 3000 * scale), line("m\(i)", "claude-opus-5-5", 3000 * scale)] }
+        do {
+            try FileManager.default.createDirectory(atPath: "\(dir)/\(name)/subagents", withIntermediateDirectories: true)
+            try (main.joined(separator: "\n") + "\n").write(toFile: path, atomically: true, encoding: .utf8)
+            try (line("s1", "claude-haiku-5-5", 9000) + "\n").write(toFile: "\(dir)/\(name)/subagents/agent-a1.jsonl", atomically: true, encoding: .utf8)
+        } catch { return .null }
+        return .string(path)
+    }
+
+    private static func startWave2(model: AppModel) {
+        model.escalateMinutes = 3
+        model.funExtras = true
+        model.showUsage = true
+        event(model, "api-gateway", "PermissionRequest", ago: 7 * 60, ["tool_name": "Bash", "tool_input": json(#"{"command":"make deploy-staging","description":"Deploy to staging"}"#)])
+        event(model, "web-app", "UserPromptSubmit", ["transcript_path": usageTranscript("web-app", scale: 2)])
+        event(model, "docs-site", "UserPromptSubmit")
+        event(model, "shop-api", "UserPromptSubmit")
+        event(model, "shop-api", "PostToolUse", ["tool_name": "Bash", "tool_input": json(#"{"command":"npm test"}"#)])
+        event(model, "data-jobs", "UserPromptSubmit", ["transcript_path": usageTranscript("data-jobs", scale: 5)])
+        event(model, "data-jobs", "PreToolUse", ["tool_name": "Agent", "tool_use_id": "tu-1", "tool_input": json(#"{"description":"Profile the nightly import"}"#)])
+        event(model, "data-jobs", "SubagentStart", ["agent_id": "a1", "agent_type": "general-purpose"])
+        event(model, "data-jobs", "PostToolUse", ["agent_id": "a1", "tool_name": "Bash", "tool_input": json(#"{"command":"python import.py","description":"Run the import","run_in_background":true}"#),
+                                                   "tool_response": json(#"{"backgroundTaskId":"b1"}"#)])
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            model.director?.showTip(Tips.match(tool: "Bash", input: json(#"{"command":"npm test"}"#)) ?? "", sessionId: "shop-api")
+            event(model, "web-app", "Stop", ["last_assistant_message": "Done."])
+            event(model, "docs-site", "Stop", ["last_assistant_message": "Done."])
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(8))
+                model.director?.openActivity(sessionId: "data-jobs", highlight: "a1", focus: false)
+            }
+            // Repeat the high-five so a screenshot can catch it.
+            for _ in 0..<10 {
+                try? await Task.sleep(for: .seconds(3))
+                let pair = ["web-app", "docs-site"].compactMap { sid in model.director?.controllers.values.first { $0.spec.sessionId == sid } }
+                guard pair.count == 2 else { continue }
+                let (l, r) = pair[0].centerX <= pair[1].centerX ? (pair[0], pair[1]) : (pair[1], pair[0])
+                l.highFive(mirrored: false, spark: true)
+                r.highFive(mirrored: true, spark: false)
+            }
+        }
+    }
+
+    private static func startAway(model: AppModel) {
+        model.showUsage = true
+        event(model, "api-gateway", "Stop", ago: 12 * 60, ["last_assistant_message": "Done."])
+        event(model, "docs-site", "PermissionRequest", ago: 4 * 60, ["tool_name": "Write", "tool_input": json(#"{"file_path":"/Users/demo/docs-site/index.md"}"#)])
+        for (i, a) in ["f1", "f2"].enumerated() {
+            event(model, "web-app", "PreToolUse", ago: 25 * 60, ["tool_name": "Agent", "tool_use_id": .string("t\(i)")])
+            event(model, "web-app", "SubagentStart", ago: 25 * 60, ["agent_id": .string(a)])
+            event(model, "web-app", "PostToolUseFailure", ago: 9 * 60, ["tool_name": "Agent", "tool_use_id": .string("t\(i)")])
+        }
+        event(model, "web-app", "PostToolUse", ago: 25 * 60, ["tool_name": "Bash", "tool_input": json(#"{"command":"npm run dev","run_in_background":true}"#),
+                                                              "tool_response": json(#"{"backgroundTaskId":"b1"}"#)])
+        event(model, "web-app", "UserPromptSubmit", ago: 6 * 60, ["task_id": "b1", "task_status": "completed"])
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1))
+            model.showDigest(since: Date().addingTimeInterval(-20 * 60))
+        }
+    }
+
+    private static func startMix(model: AppModel) {
+        Task { @MainActor in
+            // Skins load off the main thread; Crate must be in the sheet before the buddies get their looks.
+            await SkinStore.shared.loading?.value
+            SkinStore.shared.demoEnable("crate")
+            model.character = AppModel.mix
+            for sid in ["api-gateway", "web-app", "docs-site", "shop-api"] { event(model, sid, "UserPromptSubmit") }
+            event(model, "web-app", "Stop")
+            try? await Task.sleep(for: .seconds(0.5))
+            // A skin outfit on a Crate buddy, if one drew Crate.
+            if let s = model.sessions.first(where: { model.look(for: $0)?.base == "crate/crate" }) { model.setLook(s, outfit: .some("crate/cartridge")) }
+        }
+    }
+
+    private static func startSSH(model: AppModel) {
+        model.arrangement = .free
+        model.showUsage = true
+        model.demoSSH()
+        // The demo's own pid stands in for the ssh client; the claude pid is a remote one.
+        let origin = RemoteOrigin(host: "devbox", user: "tiago", sshPid: getpid(), claudePid: 4242)
+        for (i, name) in ["UserPromptSubmit", "Stop"].enumerated() {
+            var p: [String: JSONValue] = ["session_id": "remote-1", "hook_event_name": .string(name), "cwd": "/home/tiago/api"]
+            if name == "Stop" { p["last_assistant_message"] = "Migrations ran on the dev database. 3 tables changed, all tests pass." }
+            model.applyDemo(HookMessage(id: "remote-\(i)", wantsReply: false, payload: .object(p), env: HookEnv(attended: "1")), origin: origin)
+        }
+        event(model, "web-app", "UserPromptSubmit")
+        event(model, "docs-site", "Stop", ["last_assistant_message": "Done."])
+        SSHForm.shared.host = "devbox"
+        SettingsWindow.show(model: model, tab: arg("--demo-ssh") == "--demo-ssh=diagnostics" ? .diagnostics : .ssh)
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1))
+            // As if dragged: web-app and docs-site stand closer than their tags are wide.
+            let f = model.director?.floor ?? .zero
+            for (sid, dx) in [("web-app", 260.0), ("docs-site", 324.0)] {
+                guard let c = model.director?.controllers.values.first(where: { $0.spec.sessionId == sid }) else { continue }
+                c.setX(f.minX + dx - c.panelSize.width / 2)
+            }
+            model.director?.controllers.values.first { $0.spec.sessionId == "remote-1" }?.showBubble(focus: false)
+            model.director?.wake()
         }
     }
 

@@ -25,7 +25,13 @@ cp "$BIN/BuddyApp" "$APP/Contents/MacOS/Buddy"
 cp "$BIN/buddy-hook" "$APP/Contents/MacOS/buddy-hook"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 cp "$ROOT/design/sprites.json" "$APP/Contents/Resources/sprites.json"
+cp "$ROOT/Resources/prices.json" "$APP/Contents/Resources/prices.json"
+mkdir -p "$APP/Contents/Resources/skins"
+cp "$ROOT/design/skins/crate.json" "$APP/Contents/Resources/skins/crate.json"
 cp "$ICNS" "$APP/Contents/Resources/AppIcon.icns"
+# SSH sessions: Settings → SSH copies an install command that reads remote/install.sh.
+mkdir -p "$APP/Contents/Resources/remote"
+cp "$ROOT"/scripts/remote/{buddy-hook-remote,install.sh,uninstall.sh} "$APP/Contents/Resources/remote/"
 plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist" >/dev/null

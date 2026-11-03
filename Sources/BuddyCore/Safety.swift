@@ -13,7 +13,8 @@ public enum DisplayText {
         }
     }
 
-    /// Bidi, zero-width, and control characters become visible `\u{XXXX}` text. Tab and newline stay.
+    /// Hidden characters become visible `\u{XXXX}` text: bidi controls, zero-width characters, C0/C1 controls, variation
+    /// selectors, tag characters, and blank fillers (Hangul fillers, soft hyphen, and the like). Tab and newline stay.
     public static func reveal(_ s: String) -> String {
         var out = ""
         for u in s.unicodeScalars {
@@ -50,25 +51,28 @@ public enum PermissionDisplay {
     }
 }
 
-/// Checks before Buddy sends a next prompt (review H2, L5).
+/// Checks before Buddy sends a next prompt.
 public enum PromptGuard {
     public static let maxBytes = 32 * 1024
 
-    /// Drops C0 controls and DEL (tab kept), turns line breaks into spaces, caps at 32 KB of UTF-8.
+    /// Keeps tab and newline (CR and CRLF become LF), drops other C0, DEL, and C1 controls, caps at 32 KB of UTF-8.
+    /// No ESC survives, so the text cannot end the extension's bracketed paste early.
     public static func sanitize(_ s: String) -> String {
         var out = String.UnicodeScalarView()
         var bytes = 0
-        for u in s.unicodeScalars {
+        for u in s.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n").unicodeScalars {
             let v = u.value
-            let c: Unicode.Scalar
-            if v == 0x0A || v == 0x0D { c = " " } else if (v < 0x20 && v != 0x09) || v == 0x7F { continue } else { c = u }
-            let n = String(c).utf8.count
+            if (v < 0x20 && v != 0x09 && v != 0x0A) || (0x7F...0x9F).contains(v) { continue }
+            let n = String(u).utf8.count
             if bytes + n > maxBytes { break }
             bytes += n
-            out.append(c)
+            out.append(u)
         }
         return String(out)
     }
+
+    /// SSH sessions: Buddy cannot see whether claude is in the foreground of the remote terminal (docs/SSH.md).
+    public static let remoteRefusal = "Answer in the terminal. Buddy cannot send prompts to SSH sessions."
 
     /// The part of `refusal` that needs no process lookup (safe to call from a view body).
     public static func stateRefusal(_ state: SessionState) -> String? {
@@ -79,7 +83,8 @@ public enum PromptGuard {
     /// nil = safe to send. Otherwise a reason to show the user.
     /// Claude Desktop sessions have no tty: instead of the foreground check, claude must still run under Claude.app.
     public static func refusal(state: SessionState, status: ProcInfo.Status?, desktop: Bool = false,
-                               underClaudeApp: Bool = false) -> String? {
+                               underClaudeApp: Bool = false, remote: Bool = false) -> String? {
+        if remote { return remoteRefusal }
         if let r = stateRefusal(state) { return r }
         guard let st = status else { return "The Claude process is gone." }
         if st.stopped { return "Claude is suspended (Ctrl-Z)." }
@@ -91,7 +96,7 @@ public enum PromptGuard {
     }
 }
 
-/// Socket peer checks (review M1, M2).
+/// Socket peer checks.
 public enum PeerCheck {
     public static func peerPid(_ fd: Int32) -> pid_t? {
         var pid: pid_t = 0
@@ -111,22 +116,49 @@ public enum PeerCheck {
         return String(cString: r)
     }
 
-    public static func path(of pid: pid_t) -> String? {
-        var buf = [CChar](repeating: 0, count: 4096)
-        let n = proc_pidpath(pid, &buf, UInt32(buf.count))
+    public static func path(of pid: pid_t) -> String? { pathFrom { proc_pidpath(pid, $0, $1) } }
+
+    private static func pathFrom(_ fill: (UnsafeMutableRawPointer, UInt32) -> Int32) -> String? {
+        var buf = [UInt8](repeating: 0, count: 4096)
+        let n = buf.withUnsafeMutableBytes { b in b.baseAddress.map { fill($0, UInt32(b.count)) } ?? 0 }
         guard n > 0 else { return nil }
-        return resolved(String(decoding: buf.prefix(Int(n)).map { UInt8(bitPattern: $0) }, as: UTF8.self))
+        return resolved(String(decoding: buf.prefix(Int(n)), as: UTF8.self))
     }
 
-    /// Same user, and the peer runs one of `expectedPaths`.
-    public static func peerIs(_ fd: Int32, oneOf expectedPaths: [String]) -> Bool {
-        guard peerUid(fd) == getuid(), let pid = peerPid(fd), let p = path(of: pid) else { return false }
-        return expectedPaths.map(resolved).contains(p)
+    /// The peer's audit token at connect time. It names one process (pid plus pidversion), so a reused pid never matches.
+    public static func peerToken(_ fd: Int32) -> audit_token_t? {
+        var token = audit_token_t()
+        var len = socklen_t(MemoryLayout<audit_token_t>.size)
+        guard getsockopt(fd, SOL_LOCAL, LOCAL_PEERTOKEN, &token, &len) == 0, len == MemoryLayout<audit_token_t>.size else { return nil }
+        return token
+    }
+
+    /// `audit_token_to_pid` (libbsm reads the same slot).
+    public static func pid(of token: audit_token_t) -> pid_t { pid_t(bitPattern: token.val.5) }
+
+    /// The executable of the exact process in `token`, resolved. nil when that process is gone, also when its pid now
+    /// belongs to another process: the kernel compares the pidversion (`proc_pidpath_audittoken`).
+    public static func path(ofToken token: audit_token_t) -> String? {
+        var t = token
+        return pathFrom { proc_pidpath_audittoken(&t, $0, $1) }
     }
 
     /// A hook peer must be the bundled buddy-hook, started by the claude process it names (parent or grandparent).
     public static func hookPeerAllowed(peerPath: String?, expectedHookPath: String, ancestors: [Int32], claudePid: Int32?) -> Bool {
         guard let peerPath, let claudePid, peerPath == resolved(expectedHookPath) else { return false }
         return ancestors.prefix(2).contains(claudePid)  // parent or grandparent only
+    }
+}
+
+/// Which listener buddy-hook may send a payload to.
+public enum HookTrust {
+    public static let releaseNames = ["Buddy"]
+    public static let debugNames = ["Buddy", "BuddyApp"]
+
+    /// Our own user, running one of `names` from the hook's own folder. `peerPath` is resolved; `selfPath` is the hook's.
+    public static func serverAllowed(peerUid: uid_t?, ownUid: uid_t, peerPath: String?, selfPath: String?, names: [String]) -> Bool {
+        guard peerUid == ownUid, let peerPath, let selfPath else { return false }
+        let dir = (selfPath as NSString).deletingLastPathComponent
+        return names.map { PeerCheck.resolved(dir + "/" + $0) }.contains(peerPath)
     }
 }

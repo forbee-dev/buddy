@@ -34,6 +34,7 @@
 </head>
 <body>
 <header>
+  <label>Character <select id="character"><option value="clawd">clawd</option><option value="crate">crate (skin)</option></select></label>
   <label>State <select id="state"></select></label>
   <label>Scale <select id="scale"><option>3</option><option selected>4</option><option>6</option></select>x</label>
   <button id="random">Random looks</button>
@@ -48,15 +49,18 @@
 <div id="gallery"></div>
 
 <script src="sprites.js"></script>
+<script src="skins/crate.js"></script>
 <script>
 // SELFCHECK-START
-function selfCheck(d) {
+// skin: a skin document whose single character is checked (its `colors` keys count as palette keys).
+function selfCheck(d, skin) {
   const res = { pass: 0, fail: 0, log: [] };
   const ok = (cond, msg) => { if (cond) res.pass++; else { res.fail++; res.log.push('FAIL ' + msg); } };
   const STATES = ['idle', 'walk', 'working', 'question', 'done', 'sleep', 'goodbye', 'dragged', 'permission', 'error'];
   const COUNTS = { idle: [4, 8], walk: [4, 4], working: [4, 6], question: [4, 6], done: [6, 6], sleep: [4, 6], goodbye: [4, 6], dragged: [2, 2], permission: [4, 4], error: [4, 4] };
-  const KEYS = ['outline', 'body', 'shade', 'highlight', 'eye', 'white', 'cheek', 'accent', 'accentShade', 'fx', 'fx2',
+  const PKEYS = ['outline', 'body', 'shade', 'highlight', 'eye', 'white', 'cheek', 'accent', 'accentShade', 'fx', 'fx2',
     'pupil', 'mouthDark', 'tongue', 'teeth', 'propGreen', 'propBlue', 'propRed', 'propOrange', 'propPurple', 'propLight', 'propYellow'];
+  const KEYS = PKEYS.concat(Object.keys((skin && skin.colors) || {}));
   const lum = h => { const c = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(v => v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4); return .2126 * c[0] + .7152 * c[1] + .0722 * c[2]; };
   const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
   const rowsOk = (rows, where) => {
@@ -67,22 +71,25 @@ function selfCheck(d) {
     });
   };
   ok(d.version === 1, 'version is 1');
-  const OFFACE = new Set(['P', 'W']); // eye and pupil chars in body rows
+  const OFFACE = new Set(skin ? ['P', 'W', 'q'] : ['P', 'W']); // eye and pupil chars in body rows (q: a skin screen face)
   ok(d.grid && d.grid.w === 32 && d.grid.h === 32, 'grid is 32x32');
   ok(d.fps > 0, 'fps set');
   const pnames = Object.keys(d.palettes), cnames = Object.keys(d.bases);
-  ok(cnames.length === 1 && cnames[0] === 'clawd', 'bases is exactly clawd (got ' + cnames.join() + ')');
+  ok(cnames.length === 1 && (skin || cnames[0] === 'clawd'), 'bases is exactly one character (got ' + cnames.join() + ')');
   ok(pnames.length >= 10, 'at least 10 palettes');
-  ok(Object.keys(d.outfits).length >= 14, 'at least 14 outfits');
+  if (!skin) {
+    ok(Object.keys(d.outfits).length >= 14, 'at least 14 outfits');
+    ['cap', 'headphones', 'scarf', 'glasses', 'wizard-hat', 'hoodie-hood', 'bow', 'crown', 'party-hat', 'beanie', 'cowboy-hat', 'bandana', 'bowtie', 'propeller-cap'].forEach(n => ok(n in d.outfits, 'outfit ' + n + ' exists'));
+  }
   ['claude', 'mint', 'sky', 'grape', 'lemon', 'charcoal', 'rose', 'teal', 'orange-sunset', 'forest'].forEach(n => ok(n in d.palettes, 'palette ' + n + ' exists'));
-  ['cap', 'headphones', 'scarf', 'glasses', 'wizard-hat', 'hoodie-hood', 'bow', 'crown', 'party-hat', 'beanie', 'cowboy-hat', 'bandana', 'bowtie', 'propeller-cap'].forEach(n => ok(n in d.outfits, 'outfit ' + n + ' exists'));
   Object.entries(d.legend).forEach(([k, v]) => {
     ok(v === null || KEYS.includes(v), 'legend ' + k + ' maps to a palette key');
-    if (v) pnames.forEach(p => ok(v in d.palettes[p], 'palette ' + p + ' defines legend key ' + v));
+    if (v && !(skin && skin.colors && v in skin.colors)) pnames.forEach(p => ok(v in d.palettes[p], 'palette ' + p + ' defines legend key ' + v));
+    if (skin && skin.colors && v in skin.colors) ok(/^#[0-9a-fA-F]{6}$/.test(skin.colors[v]), 'skin colour ' + v + ' is a hex colour');
   });
   ok(KEYS.every(k => Object.values(d.legend).includes(k)), 'every palette key is used by the legend');
   pnames.forEach(p => {
-    KEYS.forEach(k => ok(/^#[0-9a-fA-F]{6}$/.test(d.palettes[p][k] || ''), 'palette ' + p + '.' + k + ' is a hex colour'));
+    PKEYS.forEach(k => ok(/^#[0-9a-fA-F]{6}$/.test(d.palettes[p][k] || ''), 'palette ' + p + '.' + k + ' is a hex colour'));
     const P = d.palettes[p];
     ok(contrast(P.eye, P.body) >= 4, 'palette ' + p + ' eye/body contrast >= 4 (got ' + contrast(P.eye, P.body).toFixed(1) + ')');
     ok(contrast(P.outline, P.body) >= 2, 'palette ' + p + ' outline/body contrast >= 2');
@@ -112,7 +119,7 @@ function selfCheck(d) {
         ok(Array.isArray(f.head) && f.head.length === 2 && f.head.every(Number.isInteger), c + '.' + s + '[' + i + '] head is [int,int]');
       });
     });
-    ok(d.bases[c].states.idle.frames[0].head.join() === '0,0', c + ' idle frame 0 head is [0,0]');
+    if (!skin) ok(d.bases[c].states.idle.frames[0].head.join() === '0,0', c + ' idle frame 0 head is [0,0]');
     ok(Object.keys(d.bases[c].states).length === STATES.length, c + ' has exactly ' + STATES.length + ' states');
   });
   Object.entries(d.outfits).forEach(([n, o]) => {
@@ -130,14 +137,29 @@ function selfCheck(d) {
   catch (e) { console.warn('fetch failed, using sprites.js fallback:', e.message); D = window.SPRITES; }
   const chk = document.getElementById('check');
   if (!D) { chk.textContent = 'self-check: no data'; return; }
-  const res = selfCheck(D);
+  // ?character=crate: the bundled example skin, merged the way the app does (built-in outfits it lists only).
+  const query = new URLSearchParams(location.search);
+  let C = 'clawd', SKIN = null;
+  if (query.get('character') === 'crate') {
+    try { const r = await fetch('skins/crate.json'); if (!r.ok) throw new Error(r.status); SKIN = await r.json(); }
+    catch (e) { SKIN = window.CRATE; }
+    if (SKIN) {
+      const allow = SKIN.bases.crate.outfits;
+      D = { ...D, legend: { ...D.legend, ...SKIN.legend }, bases: { crate: SKIN.bases.crate },
+        outfits: Object.fromEntries(Object.entries(D.outfits).filter(([k]) => allow.includes(k))) };
+      C = 'crate';
+    }
+  }
+  document.getElementById('character').value = C;
+  document.getElementById('character').onchange = e => { location.search = e.target.value === 'crate' ? '?character=crate' : ''; };
+  const res = selfCheck(D, SKIN);
   chk.textContent = 'self-check: ' + res.pass + ' PASS / ' + res.fail + ' FAIL';
   chk.className = res.fail ? 'fail' : 'pass';
   console.log('self-check', res.pass, 'PASS', res.fail, 'FAIL');
   res.log.forEach(l => console.error(l));
 
   const $ = id => document.getElementById(id);
-  const C = 'clawd', palNames = Object.keys(D.palettes), outNames = Object.keys(D.outfits);
+  const palNames = Object.keys(D.palettes), outNames = Object.keys(D.outfits);
   const STATES = Object.keys(D.bases[C].states);
   const NAMES = ['api-gateway', 'web-app', 'docs-site', 'data-jobs'];
   const looks = [['claude', 'cap'], ['teal', 'headphones'], ['grape', 'wizard-hat'], ['orange-sunset', 'propeller-cap']].map(([palette, outfit]) => ({ palette, outfit }));
@@ -180,7 +202,7 @@ function selfCheck(d) {
     refreshSelects();
   };
 
-  const colour = (pal, ch) => { const k = D.legend[ch]; return k ? D.palettes[pal][k] : null; };
+  const colour = (pal, ch) => { const k = D.legend[ch]; return k ? D.palettes[pal][k] || (SKIN && SKIN.colors[k]) : null; };
   function paint(ctx, rows, pal, ox, oy, s, flip) {
     rows.forEach((r, y) => { for (let x = 0; x < 32; x++) {
       const c = colour(pal, r[x]); if (!c) continue;
@@ -244,7 +266,7 @@ function selfCheck(d) {
     card.append(stage, tag); ex.appendChild(card);
     draw(cv.getContext('2d'), k, 0, { palette: 'claude', outfit: 'none' }, 3, 0, 0, false);
   });
-  const q = new URLSearchParams(location.search);
+  const q = query;
   if (q.get('view') === 'expr') document.body.classList.add('zoom');
   if (q.get('state')) $('state').value = q.get('state');
   refreshSelects(); resize();

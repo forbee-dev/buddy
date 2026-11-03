@@ -11,7 +11,7 @@ public enum InboxClient {
         return out
     }
 
-    /// Only `/tmp/cc-socks/<claudePid>.sock` is accepted, as `/private/tmp/...` (review M2).
+    /// Only `/tmp/cc-socks/<claudePid>.sock` is accepted, as `/private/tmp/...`.
     public static func validatedSocket(_ path: String?, claudePid: Int32?) -> String? {
         guard var p = path, let pid = claudePid else { return nil }
         if p.hasPrefix("/tmp/") { p = "/private" + p }

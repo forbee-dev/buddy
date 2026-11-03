@@ -83,19 +83,74 @@ final class AppServices {
         guard let vsix = bundledExtension else { message = "No extension is bundled with this build."; return }
         busy = true
         defer { busy = false }
-        let result: (Int32, String) = await Task.detached {
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: cli)
-            p.arguments = ["--install-extension", vsix.path, "--force"]
-            let out = Pipe()
-            p.standardOutput = out
-            p.standardError = out
-            do { try p.run() } catch { return (-1, error.localizedDescription) }
-            let data = out.fileHandleForReading.readDataToEndOfFile()
-            p.waitUntilExit()
-            return (p.terminationStatus, String(decoding: data, as: UTF8.self))
-        }.value
-        let tail = result.1.split(separator: "\n").last.map(String.init) ?? ""
-        message = result.0 == 0 ? "Installed in \(editor). Reload the editor window." : "\(editor) install failed: \(tail)"
+        let result = await Self.run(cli, ["--install-extension", vsix.path, "--force"])
+        message = result.0 == 0 ? "Installed in \(editor). Reload the editor window." : "\(editor) install failed: \(Self.lastLine(result.1))"
+    }
+
+    /// Runs a tool with an args array (no shell). Returns the exit status and the combined output.
+    /// After `timeout` the tool gets terminate(). The output is read as it comes, and only until the tool exits:
+    /// a helper process that keeps the pipe open (editor CLIs start some) cannot hang Buddy.
+    static func run(_ tool: String, _ args: [String], timeout: TimeInterval = 30) async -> (Int32, String) {
+        await Task.detached { runBlocking(tool, args, timeout: timeout) }.value
+    }
+
+    /// Blocks its thread (semaphores), so it stays off the async executor.
+    private nonisolated static func runBlocking(_ tool: String, _ args: [String], timeout: TimeInterval) -> (Int32, String) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: tool)
+        p.arguments = args
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = out
+        let collected = Collected()
+        let reader = out.fileHandleForReading
+        let eof = DispatchSemaphore(value: 0)
+        let exited = DispatchSemaphore(value: 0)
+        // The handler is the only reader. Empty data is EOF; the handler would be called again at once, forever.
+        reader.readabilityHandler = { h in
+            let d = h.availableData
+            if d.isEmpty { h.readabilityHandler = nil; eof.signal() } else { collected.append(d) }
+        }
+        p.terminationHandler = { _ in exited.signal() }
+        do { try p.run() } catch {
+            reader.readabilityHandler = nil
+            return (-1, error.localizedDescription)
+        }
+        let timedOut = exited.wait(timeout: .now() + timeout) == .timedOut
+        if timedOut {
+            p.terminate()
+            _ = exited.wait(timeout: .now() + 2)
+        }
+        // A child that outlives the process can hold the pipe open, so EOF gets a short limit.
+        _ = eof.wait(timeout: .now() + 0.25)
+        reader.readabilityHandler = nil
+        try? reader.close()
+        let text = String(decoding: collected.data, as: UTF8.self)
+        if timedOut { return (-2, text + "\nStopped after \(Int(timeout)) s.") }
+        return (p.terminationStatus, text)
+    }
+
+    /// Pipe output from the reader thread.
+    private final class Collected: @unchecked Sendable {
+        private let lock = NSLock()
+        private var bytes = Data()
+        func append(_ d: Data) { lock.withLock { bytes.append(d) } }
+        var data: Data { lock.withLock { bytes } }
+    }
+
+    /// A file or folder from the app bundle; debug builds also take `devPath` in the source checkout.
+    static func bundledResource(_ name: String, ext: String? = nil, subdirectory: String? = nil, devPath: String) -> URL? {
+        var candidates = [Bundle.main.url(forResource: name, withExtension: ext, subdirectory: subdirectory)]
+        #if DEBUG
+        candidates.append(URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/" + devPath))
+        #endif
+        return candidates.compactMap { $0 }.first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    static func lastLine(_ s: String) -> String { s.split(separator: "\n").last.map(String.init) ?? "" }
+
+    /// Version of the bundled .vsix, from its file name.
+    var bundledExtensionVersion: String? {
+        bundledExtension.map { $0.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "buddy-companion-", with: "") }
     }
 }

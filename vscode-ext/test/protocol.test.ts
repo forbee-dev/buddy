@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { LineFramer, handleLine as hl, sanitize, MAX_LINE_BYTES, MAX_TEXT_BYTES, TerminalLike } from "../src/protocol";
+import { readFileSync } from "fs";
+import { join } from "path";
+import { LineFramer, handleLine as hl, sanitize, framed, PASTE_END, MAX_LINE_BYTES, MAX_TEXT_BYTES, TerminalLike } from "../src/protocol";
 
 const yes = async () => true;
 const handleLine = (l: string, f: (p: number) => TerminalLike | undefined, c = yes) => hl(l, f, c);
@@ -68,14 +70,34 @@ test("too-long text acks too-long", async () => {
   assert.deepEqual(r.ack, { kind: "ack", reqId: "1", ok: false, error: "too-long" });
 });
 
-test("sanitize strips controls and newlines, keeps tab", () => {
-  assert.equal(sanitize("a\r\nb\nc\x1b[31m\x00d\te\x7f"), "a  b c[31md\te");
+test("sanitize matches the shared vectors", () => {
+  const vectors: { in: string; out: string }[] = JSON.parse(
+    readFileSync(join(__dirname, "../../../Tests/Fixtures/sanitize-vectors.json"), "utf8"),
+  );
+  assert.ok(vectors.length >= 15);
+  vectors.forEach((v, i) => assert.equal(sanitize(v.in), v.out, `vector ${i}`));
 });
 
-test("send sanitizes before sendText", async () => {
+test("sanitize keeps newline and tab, strips other controls", () => {
+  assert.equal(sanitize("a\r\nb\nc\x1b[31m\x00d\te\x7f\rf\x9b201~"), "a\nb\nc[31md\te\nf201~");
+});
+
+test("send pastes the text bracketed, then presses Enter separately", async () => {
   const a = fake();
-  await handleLine('{"kind":"send","reqId":"r","shellPid":1,"text":"x\\ny\\u001bz"}', () => a.t);
-  assert.deepEqual(a.calls, [["send", "x yz", true]]);
+  await handleLine('{"kind":"send","reqId":"r","shellPid":1,"text":"line one\\nline two"}', () => a.t);
+  assert.deepEqual(a.calls, [
+    ["send", "\x1b[200~line one\nline two\x1b[201~", false],
+    ["send", "", true],
+  ]);
+});
+
+test("ESC inside the text cannot end the paste early", async () => {
+  const a = fake();
+  await handleLine('{"kind":"send","reqId":"r","shellPid":1,"text":"x\\u001b[201~\\nrm -rf ~\\u009b201~"}', () => a.t);
+  const sent = a.calls[0][1] as string;
+  assert.equal(sent, framed("x[201~\nrm -rf ~201~"));
+  assert.equal(sent.indexOf(PASTE_END), sent.length - PASTE_END.length);
+  assert.equal(sent.split("\x1b").length, 3); // only the two framing ESCs
 });
 
 test("no claude child acks claude-not-foreground and sends nothing", async () => {
@@ -97,7 +119,7 @@ test("send goes to terminal matching shellPid", async () => {
   const find = (p: number) => ({ 1: a.t, 2: b.t } as Record<number, TerminalLike>)[p];
   const r = await handleLine('{"kind":"send","reqId":"r","shellPid":2,"text":"hi","submit":false}', find);
   assert.deepEqual(r.ack, { kind: "ack", reqId: "r", ok: true });
-  assert.deepEqual(b.calls, [["send", "hi", false]]);
+  assert.deepEqual(b.calls, [["send", framed("hi"), false]]);
   assert.equal(a.calls.length, 0);
   assert.ok(!r.log!.includes("hi"));
 });

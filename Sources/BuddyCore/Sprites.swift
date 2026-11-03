@@ -19,6 +19,8 @@ public struct SpriteSheet: Decodable, Sendable {
     public var palettes: [String: [String: String]]
     public var bases: [String: Base]
     public var outfits: [String: Outfit]
+    /// Fixed colors of skin legend keys that palettes do not have (e.g. a screen color).
+    public var colors: [String: String] = [:]
     /// Sorted once at load.
     public private(set) var baseNames: [String] = []
     public private(set) var paletteNames: [String] = []
@@ -28,10 +30,14 @@ public struct SpriteSheet: Decodable, Sendable {
 
     public static func load(_ data: Data) throws -> SpriteSheet {
         var sheet = try JSONDecoder().decode(SpriteSheet.self, from: data)
-        sheet.baseNames = sheet.bases.keys.sorted()
-        sheet.paletteNames = sheet.palettes.keys.sorted()
-        sheet.outfitNames = sheet.outfits.keys.sorted()
+        sheet.reindex()
         return sheet
+    }
+
+    mutating func reindex() {
+        baseNames = bases.keys.sorted()
+        paletteNames = palettes.keys.sorted()
+        outfitNames = outfits.keys.sorted()
     }
 
     public func outfits(fitting base: String) -> [String] {
@@ -103,7 +109,7 @@ public enum SpriteRenderer {
                 guard key != "." else { continue }
                 guard let slot = sheet.legend[key] else { out.missing.insert("char \(key)"); continue }
                 guard let slotName = slot else { continue }
-                guard let hex = palette[slotName], let rgb = parseHex(hex) else { out.missing.insert("key \(slotName)"); continue }
+                guard let hex = palette[slotName] ?? sheet.colors[slotName], let rgb = parseHex(hex) else { out.missing.insert("key \(slotName)"); continue }
                 let tx = x + dx, ty = y + dy
                 guard tx >= 0, ty >= 0, tx < out.width, ty < out.height else { continue }
                 let px = mirrored ? out.width - 1 - tx : tx

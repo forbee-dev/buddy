@@ -21,19 +21,12 @@ public enum TranscriptTail {
         return lastAssistantText(inTail: data, truncatedStart: cut)
     }
 
-    /// O_NOFOLLOW rejects a symlink; fstat on the open fd checks the file that is really read.
     static func readTail(_ path: String, uid: uid_t) -> (Data, Bool)? {
-        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
-        guard fd >= 0 else { return nil }
+        guard let (fd, size) = SafeFile.open(path, uid: uid) else { return nil }
         defer { close(fd) }
-        var st = stat()
-        guard fstat(fd, &st) == 0, (st.st_mode & S_IFMT) == S_IFREG, st.st_uid == uid else { return nil }
-        let start = max(0, Int64(st.st_size) - Int64(maxBytes))
-        let want = Int(Int64(st.st_size) - start)
-        var buf = [UInt8](repeating: 0, count: want)
-        let n = buf.withUnsafeMutableBytes { pread(fd, $0.baseAddress, want, off_t(start)) }
-        guard n >= 0 else { return nil }
-        return (Data(buf.prefix(n)), start > 0)
+        let start = max(0, size - Int64(maxBytes))
+        guard let data = SafeFile.read(fd, from: start, count: Int(size - start)) else { return nil }
+        return (data, start > 0)
     }
 
     /// Walks lines backwards. Stops at the user's own prompt, so text from an older turn is not shown.
@@ -65,5 +58,37 @@ public enum TranscriptTail {
 
     private static func cap(_ s: String) -> String {
         DisplayText.reveal(s.count > maxChars ? String(s.prefix(maxChars)) + "…" : s)
+    }
+}
+
+/// Opens files Buddy did not write (transcripts, skins, prices) without following links.
+public enum SafeFile {
+    /// The folder is resolved first (`realpath`), then opened with O_NOFOLLOW_ANY: no part of the path may be a symlink at
+    /// open time, so a folder swapped after the check is refused too. fstat on the open fd checks the file that is really
+    /// read: regular, and owned by `uid` (nil: any owner, for signed app bundle resources).
+    public static func open(_ path: String, uid: uid_t? = getuid()) -> (fd: Int32, size: Int64)? {
+        let name = (path as NSString).lastPathComponent
+        guard !name.isEmpty, name != ".", name != "..", let dir = realpath((path as NSString).deletingLastPathComponent, nil) else { return nil }
+        let resolved = String(cString: dir) + "/" + name
+        free(dir)
+        // O_NOFOLLOW_ANY also covers the last part; with O_NOFOLLOW added, open fails with EINVAL.
+        let fd = Darwin.open(resolved, O_RDONLY | O_NOFOLLOW_ANY | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else { return nil }
+        var st = stat()
+        guard fstat(fd, &st) == 0, (st.st_mode & S_IFMT) == S_IFREG, uid.map({ st.st_uid == $0 }) ?? true else { close(fd); return nil }
+        return (fd, Int64(st.st_size))
+    }
+
+    public static func read(_ fd: Int32, from offset: Int64, count: Int) -> Data? {
+        var buf = [UInt8](repeating: 0, count: max(0, count))
+        let n = buf.withUnsafeMutableBytes { pread(fd, $0.baseAddress, count, off_t(offset)) }
+        return n >= 0 ? Data(buf.prefix(n)) : nil
+    }
+
+    /// The whole file when it is at most `maxBytes`; nil when it is missing, unsafe, or too big.
+    public static func contents(_ path: String, maxBytes: Int, uid: uid_t? = getuid()) -> Data? {
+        guard let (fd, size) = open(path, uid: uid) else { return nil }
+        defer { close(fd) }
+        return size <= Int64(maxBytes) ? read(fd, from: 0, count: Int(size)) : nil
     }
 }

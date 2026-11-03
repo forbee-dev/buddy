@@ -27,11 +27,9 @@ public struct QuestionFlow: Sendable, Equatable {
     public mutating func next() { go(to: step + 1) }
     public mutating func back() { go(to: step - 1) }
 
-    /// Picks a row on the current question. Returns true when the card should auto-advance:
-    /// single choice on a real option, and not on the last question.
-    @discardableResult
-    public mutating func pick(_ row: Int) -> Bool {
-        guard let q = current, row >= 0, row <= q.options.count else { return false }
+    /// Picks a row on the current question. The card never moves on by itself: Return or Next does.
+    public mutating func pick(_ row: Int) {
+        guard let q = current, row >= 0, row <= q.options.count else { return }
         cursor[step] = row
         if row == q.options.count {
             // Single choice: Other replaces the selection. Multi: Other adds to it.
@@ -41,18 +39,17 @@ public struct QuestionFlow: Sendable, Equatable {
                 otherOn.insert(step)
                 picks[step] = []
             }
-            return false
+            return
         }
         let label = q.options[row].label
         if q.multiSelect {
             var set = picks[step] ?? []
             if set.contains(label) { set.remove(label) } else { set.insert(label) }
             picks[step] = set
-            return false
+            return
         }
         picks[step] = [label]
         otherOn.remove(step)
-        return !isLastQuestion
     }
 
     public mutating func moveCursor(_ delta: Int) {
@@ -62,7 +59,7 @@ public struct QuestionFlow: Sendable, Equatable {
 
     public func isPicked(_ i: Int, _ label: String) -> Bool { picks[i]?.contains(label) ?? false }
 
-    /// The answer string sent to Claude: the option label; multiSelect labels joined with ", " (docs/hooks-facts.md W2 H1).
+    /// The answer string sent to Claude: the option label; multiSelect labels joined with ", " (docs/hooks-facts.md).
     public func answer(_ i: Int) -> String {
         guard questions.indices.contains(i) else { return "" }
         let q = questions[i]
@@ -87,9 +84,20 @@ public struct QuestionFlow: Sendable, Equatable {
     public var progress: String { isReview ? "Review" : "\(min(step + 1, count)) of \(count)" }
 }
 
-/// Keys the question card handles itself. Command-key shortcuts never reach this.
+/// Keys the question card handles itself. Command-key shortcuts never reach this. Tab and Shift-Tab move focus.
 public enum QuestionKey: Equatable, Sendable {
-    case digit(Int), left, right, up, down, tab(shift: Bool), space, returnKey
+    case digit(Int), left, right, up, down, space, returnKey
+}
+
+/// Keys a focused text field keeps.
+public enum TextFieldKeys {
+    /// kVK_Delete.
+    public static let delete = 51
+
+    /// ⌘⌫ deletes to the line start while text is edited. It must never reach the card's Deny shortcut (⌘⌫).
+    public static func keepInField(keyCode: Int, command: Bool, textFocused: Bool) -> Bool {
+        textFocused && command && keyCode == delete
+    }
 }
 
 public enum QuestionKeyAction: Equatable, Sendable {
@@ -101,18 +109,19 @@ public enum QuestionKeys {
     public static func row(forDigit d: Int, rows: Int) -> Int? { (1...9).contains(d) && d <= rows ? d - 1 : nil }
 
     /// While the Other field has focus only Return acts (it confirms the text); every other key types.
-    public static func action(_ key: QuestionKey, flow: QuestionFlow, textFocused: Bool) -> QuestionKeyAction {
+    /// `controlFocused`: a button or other control has keyboard focus, so Space presses it instead of the option row.
+    public static func action(_ key: QuestionKey, flow: QuestionFlow, textFocused: Bool, controlFocused: Bool = false) -> QuestionKeyAction {
         if textFocused { return key == .returnKey ? .primary : .ignore }
         switch key {
         case .digit(let d):
             guard !flow.isReview, let r = row(forDigit: d, rows: flow.rows) else { return .ignore }
             return .pick(r)
-        case .left, .tab(shift: true): return .back
-        case .right, .tab(shift: false): return .next
+        case .left: return .back
+        case .right: return .next
         case .up: return flow.isReview ? .ignore : .cursor(-1)
         case .down: return flow.isReview ? .ignore : .cursor(1)
         case .space:
-            guard !flow.isReview, let c = flow.cursor[flow.step] else { return .ignore }
+            guard !controlFocused, !flow.isReview, let c = flow.cursor[flow.step] else { return .ignore }
             return .pick(c)
         case .returnKey: return .primary
         }

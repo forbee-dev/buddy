@@ -51,8 +51,12 @@ public struct HookMessage: Codable, Sendable, Equatable {
     public var wantsReply: Bool
     public var payload: JSONValue
     public var env: HookEnv
-    public init(id: String, wantsReply: Bool, payload: JSONValue, env: HookEnv) {
-        self.id = id; self.wantsReply = wantsReply; self.payload = payload; self.env = env
+    /// Remote hook only (`remote.sock`): who sent it, for display. The main socket rejects a message with either field.
+    public var remote: RemoteInfo?
+    /// Remote hook only: the shared secret. The app drops it right after the check.
+    public var token: String?
+    public init(id: String, wantsReply: Bool, payload: JSONValue, env: HookEnv, remote: RemoteInfo? = nil, token: String? = nil) {
+        self.id = id; self.wantsReply = wantsReply; self.payload = payload; self.env = env; self.remote = remote; self.token = token
     }
 }
 

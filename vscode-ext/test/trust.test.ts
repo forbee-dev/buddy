@@ -53,6 +53,13 @@ test("symlinked dir and symlinked socket rejected", async () => {
   } finally { s.done(); }
 });
 
-test("missing socket rejected", () => {
-  assert.match(checkSocketTrust(os.tmpdir(), "/nonexistent/x", uid)!, /./);
+test("missing socket in a trusted dir reports ENOENT", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "bt-"));
+  try {
+    fs.chmodSync(root, 0o700);
+    assert.equal(checkSocketTrust(root, path.join(root, "none"), uid), "missing (ENOENT)");
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+// A socket owned by another uid inside a dir we own cannot be made without root, and the
+// function takes one uid for both checks. The "wrong owner rejected" test covers the uid compare.

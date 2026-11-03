@@ -9,7 +9,7 @@ import Testing
         _ = s.apply(hook("PermissionRequest", id: "old", extra: ["tool_name": "Bash"]))
         let c = s.apply(hook("PermissionRequest", id: "new", extra: ["tool_name": "Bash"]))
         #expect(c.staleRequests == ["old"])
-        let oldOK = s.resolve(requestId: "old")
+        let oldOK = s.resolve(sid: "s1", requestId: "old")
         #expect(!oldOK)
         #expect(s.sessions["s1"]?.pending?.id == "new")
     }
@@ -29,7 +29,7 @@ import Testing
     }
 
     @Test func promptSanitized() { // L5
-        #expect(PromptGuard.sanitize("a\nb\r\nc\td\u{1B}[31m\u{7F}e\u{0}") == "a b  c\td[31me")
+        #expect(PromptGuard.sanitize("a\nb\r\nc\td\u{1B}[31m\u{7F}e\u{0}\rf\u{9B}g") == "a\nb\nc\td[31me\nfg")
         let big = PromptGuard.sanitize(String(repeating: "é", count: 40_000))
         #expect(big.utf8.count <= PromptGuard.maxBytes && big.utf8.count > PromptGuard.maxBytes - 2)
     }
@@ -165,8 +165,10 @@ import Testing
         #expect(PeerCheck.peerPid(client) == getpid())
         #expect(PeerCheck.peerUid(client) == getuid())
         let me = try #require(PeerCheck.path(of: getpid()))
-        #expect(PeerCheck.peerIs(client, oneOf: [me]))
-        #expect(!PeerCheck.peerIs(client, oneOf: ["/bin/ls"]))
+        let peer = PeerCheck.peerPid(client).flatMap(PeerCheck.path(of:))
+        let name = (me as NSString).lastPathComponent
+        #expect(HookTrust.serverAllowed(peerUid: PeerCheck.peerUid(client), ownUid: getuid(), peerPath: peer, selfPath: me, names: [name]))
+        #expect(!HookTrust.serverAllowed(peerUid: PeerCheck.peerUid(client), ownUid: getuid(), peerPath: peer, selfPath: me, names: ["ls"]))
     }
 
     @Test func hookPeerPolicy() { // M2

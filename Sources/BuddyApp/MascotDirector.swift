@@ -11,10 +11,12 @@ struct MascotSpec {
     var sleeping: Bool
     var subagents: [Subagent] = []
     var shells = 0
+    var waitingSince: Date?
 }
 
 /// Reconciles mascots with sessions and runs the shared animation loop.
-/// The timer exists only while mascots exist: 8 Hz (sprite fps) at rest, 30 Hz while something moves (review P1).
+/// The timer exists only while mascots exist: 8 Hz (sprite fps) at rest, 30 Hz while something moves, and none at all
+/// while every buddy sleeps alone (the sleep loop then plays in the render server).
 @MainActor
 final class MascotDirector {
     unowned let model: AppModel
@@ -33,6 +35,10 @@ final class MascotDirector {
     private var wasGrouped = false
     private var dragStart: CGPoint?
     var isGroupDragging: Bool { dragStart != nil }
+    private var finishes: [HighFive.Finish] = []
+    private var partied = false
+    /// Mouse monitors for click-through while the timer is off; none otherwise.
+    private var mouseMonitors: [Any] = []
 
     init(model: AppModel) {
         self.model = model
@@ -51,13 +57,13 @@ final class MascotDirector {
     func specs() -> [MascotSpec] {
         guard let sheet = model.sheet else { return [] }
         let visible = model.sessions.filter { !$0.hidden }
-        guard let top = visible.max(by: { urgency($0) < urgency($1) }) else {
+        guard let top = visible.max(by: { urgency($0.state) < urgency($1.state) }) else {
             guard model.sleepMascot, let look = sleepLook(sheet) else { return [] }
             return [MascotSpec(key: "sleep", sessionId: nil, state: .idle, look: look, label: "zzz", badge: 0, sleeping: true)]
         }
         if model.mode == .single {
             // Single mode keeps the project look; per-session uniqueness is for several buddies.
-            guard let look = model.projectLook(cwd: top.cwd) else { return [] }
+            guard let look = model.projectLook(cwd: top.lookKey) else { return [] }
             let badge = visible.filter { $0.state.needsAttention || $0.state == .done }.count
             let label = visible.count == 1 ? top.projectName : "\(visible.count) sessions"
             return [withActivity(MascotSpec(key: "single", sessionId: top.id, state: top.state, look: look, label: label, badge: badge, sleeping: false), top)]
@@ -75,16 +81,17 @@ final class MascotDirector {
         var spec = spec
         if model.showMinis { spec.subagents = Array(s.subagents.values) }
         if model.showShells { spec.shells = s.runningShells }
+        spec.waitingSince = s.waitingSince
         return spec
     }
 
     private func sleepLook(_ sheet: SpriteSheet) -> Look? {
-        guard let base = sheet.baseNames.first, let palette = sheet.paletteNames.first else { return nil }
+        guard let base = model.characters.first, let palette = sheet.paletteNames.first else { return nil }
         return Look(base: base, palette: palette, outfit: nil)
     }
 
-    private func urgency(_ s: Session) -> Int {
-        switch s.state {
+    private func urgency(_ state: SessionState) -> Int {
+        switch state {
         case .needsPermission, .asking: 4
         case .done, .error: 3
         case .working: 2
@@ -99,18 +106,25 @@ final class MascotDirector {
         seen = seen.filter { keys.contains($0.key) || controllers[$0.key] != nil }
         for (key, c) in controllers where !keys.contains(key) { c.leave() }
         var fresh: [MascotController] = []
+        var finished: [MascotController] = []
         for spec in specs {
-            if let c = controllers[spec.key], !c.isLeaving { c.update(spec) }
+            if let c = controllers[spec.key], !c.isLeaving {
+                if spec.state == .done && c.spec.state != .done { finished.append(c) }
+                c.update(spec)
+            }
             else {
                 controllers[spec.key]?.close()
                 let width = 32 * model.pointScale
                 let c = MascotController(spec: spec, director: self, startX: grouped ? groupBounds().maxX + 10 : freeX(width: width))
+                // freeX gives a center; the label is known now, so the spot keeps its tag clear too.
+                if !grouped { c.setX(freeX(width: c.footprint, excluding: c) - c.panelSize.width / 2) }
                 controllers[spec.key] = c
                 fresh.append(c)
             }
         }
         relayoutGroup()
         for c in fresh { if let slot = slot(for: c) { c.setY(slot.y) } }
+        celebrate(finished)
         images.prune(keeping: Set(controllers.values.flatMap { c in [c.spec.look, Look(base: c.spec.look.base, palette: c.spec.look.palette, outfit: nil)] }))
         wake()
     }
@@ -121,6 +135,49 @@ final class MascotDirector {
         for c in controllers.values { c.relayout() }
         sync()
     }
+
+    /// High-five for two buddies that finish within 3 s and 300 pt (or next to each other in a group);
+    /// a party when every buddy (2 or more) is done. Fun extras only, never with Reduce Motion.
+    private func celebrate(_ finished: [MascotController]) {
+        let live = controllers.values.filter { !$0.isLeaving && !$0.spec.sleeping }
+        let allDone = live.count >= 2 && live.allSatisfy { $0.spec.state == .done }
+        defer { if !allDone { partied = false } }
+        guard model.funExtras, !model.reduceMotion, !finished.isEmpty else { return }
+        let now = Date()
+        finishes.removeAll { now.timeIntervalSince($0.at) > HighFive.window || controllers[$0.key] == nil }
+        let order = members()
+        var fived = false
+        for c in finished {
+            let f = HighFive.Finish(key: c.key, at: now, x: Double(c.centerX), slot: grouped ? order.firstIndex { $0 === c } : nil)
+            if let p = HighFive.partner(for: f, among: finishes), let other = controllers[p.key], !other.isLeaving {
+                let (l, r) = other.centerX <= c.centerX ? (other, c) : (c, other)
+                l.highFive(mirrored: false, spark: true)
+                r.highFive(mirrored: true, spark: false)
+                finishes.removeAll { $0.key == p.key }
+                fived = true
+            } else {
+                finishes.append(f)
+            }
+        }
+        if allDone && !partied {
+            partied = true
+            if !fived { live.forEach { $0.replayDone() } }
+        }
+    }
+
+    /// On the session's buddy; when it is gone (the last digest, shown again later), on any buddy.
+    func showDigest(_ lines: [DigestLine], sessionId: String) {
+        let live = controllers.values.filter { !$0.isLeaving }
+        (live.first { $0.spec.sessionId == sessionId } ?? live.first)?.showDigest(lines)
+        wake()
+    }
+
+    func showTip(_ text: String, sessionId: String) {
+        controllers.values.first { $0.spec.sessionId == sessionId }?.showTip(text)
+        wake()
+    }
+
+    func bubbleOpen(_ sid: String) -> Bool { controllers.values.contains { $0.spec.sessionId == sid && $0.hasBubble } }
 
     func cardChanged(_ sid: String) {
         controllers.values.first { $0.spec.sessionId == sid }?.cardChanged()
@@ -244,10 +301,10 @@ final class MascotDirector {
     /// A spot on the floor not taken by another mascot, scanning from the right.
     func freeX(width: CGFloat, excluding: MascotController? = nil) -> CGFloat {
         let f = floor
-        let others = controllers.values.filter { $0 !== excluding }.map(\.centerX)
+        let others = controllers.values.filter { $0 !== excluding }
         var x = f.maxX - width * 2
         while x > f.minX + width {
-            if others.allSatisfy({ abs($0 - x) > width }) { return x }
+            if others.allSatisfy({ abs($0.centerX - x) >= TagLayout.minDistance(width, $0.footprint) }) { return x }
             x -= width
         }
         return CGFloat.random(in: (f.minX + width)...max(f.minX + width + 1, f.maxX - width))
@@ -255,11 +312,29 @@ final class MascotDirector {
 
     // MARK: Timer
 
+    /// Reduce Motion changed: a parked sleep loop starts again with the new setting.
+    func motionChanged() {
+        for c in controllers.values { c.unpark() }
+        wake()
+    }
+
     /// Recomputes the tick rate; starts, retimes, or stops the timer.
     func wake() {
         let moving = controllers.values.contains(where: \.isMoving)
+        let idle = !controllers.isEmpty && controllers.values.allSatisfy(\.isIdle)
+        if idle {
+            let fresh = controllers.values.filter { !$0.isParked }
+            if !fresh.isEmpty {
+                // One last step draws the frame, the position, and the tags; then nothing changes until an event.
+                advance(dt: 0)
+                fresh.forEach { $0.park() }
+            }
+        } else {
+            for c in controllers.values { c.unpark() }
+        }
+        watchMouse(idle && !paused && !model.buddiesHidden)
         let next = TickPolicy.interval(mascots: controllers.count, moving: moving, fps: model.sheet?.fps ?? 8,
-                                       paused: paused || model.buddiesHidden)
+                                       paused: paused || model.buddiesHidden, idle: idle)
         guard next != interval else { return }
         interval = next
         timer?.invalidate()
@@ -275,8 +350,12 @@ final class MascotDirector {
 
     private func tick() {
         let now = CACurrentMediaTime()
-        let dt = min(max(0, now - last), 0.1)
+        advance(dt: min(max(0, now - last), 0.1))
         last = now
+        wake()
+    }
+
+    private func advance(dt: Double) {
         let all = Array(controllers.values)
         let active = all.filter { !$0.isLeaving }
         if !isGroupDragging { relayoutGroup() }
@@ -285,6 +364,28 @@ final class MascotDirector {
             c.step(dt: dt, others: active)
             c.updateMousePassthrough(mouse)
         }
-        wake()
+        // Free mode: tags that still overlap (dragged or pinned buddies) get cut or stacked.
+        let fits = grouped ? [:] : TagLayout.resolve(active.map { TagLayout.Tag(id: $0.key, rect: $0.tagRect, priority: urgency($0.spec.state)) })
+        for c in all { c.setTagFit(fits[c.key]) }
+    }
+
+    /// While the timer is off, mouse moves keep the sprite's click-through right.
+    private func watchMouse(_ on: Bool) {
+        guard on == mouseMonitors.isEmpty else { return }
+        guard on else {
+            mouseMonitors.forEach(NSEvent.removeMonitor)
+            mouseMonitors = []
+            return
+        }
+        let update = { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let mouse = NSEvent.mouseLocation
+                for c in self.controllers.values { c.updateMousePassthrough(mouse) }
+            }
+        }
+        // Moves over other apps reach the global monitor; moves while Buddy is active reach the local one.
+        if let g = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved, handler: { _ in update() }) { mouseMonitors.append(g) }
+        if let l = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved, handler: { e in update(); return e }) { mouseMonitors.append(l) }
     }
 }

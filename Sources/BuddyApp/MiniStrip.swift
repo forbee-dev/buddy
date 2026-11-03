@@ -6,17 +6,28 @@ import BuddyCore
 @MainActor
 final class MiniStrip {
     static let maxShown = 4
-    /// Done and failed minis stay this long, then fade out.
+    /// Done, failed, and stopped minis stay this long, then fade out.
     static let linger: TimeInterval = 3
     static let gap: CGFloat = 3
+    /// Smallest click target (WCAG 2.5.8); a smaller mini is drawn at its size inside it.
+    static let minHit: CGFloat = 24
 
+    /// The view is the click target; `image` draws the sprite at the mini size, feet on the bottom edge.
     @MainActor private final class Mini {
         let view = SpriteView(frame: .zero)
+        let image = CALayer()
         var agent: Subagent
         var animKey = ""
         var elapsed = 0.0
         var frameIndex = -1
-        init(_ a: Subagent) { agent = a }
+        var a11y = ""
+        init(_ a: Subagent) {
+            agent = a
+            image.magnificationFilter = .nearest
+            image.contentsGravity = .resize
+            view.layer?.addSublayer(image)
+            view.setAccessibilityHelp("Press to open the Activity list.")
+        }
     }
 
     private let panel = MascotPanel(size: .zero, canKey: false)
@@ -31,8 +42,10 @@ final class MiniStrip {
     private var shownIds: [String] = []
     private var onLeft = true
     private var visible = true
+    /// When the next ended mini's linger runs out; the strip rebuilds only then.
+    private var nextExpiry: Date?
     /// Opens the parent's Activity tab; the agent id marks the row.
-    var onOpen: ((String?) -> Void)?
+    var onOpen: ((String?, Int) -> Void)?
     /// Reserved width next to the buddy; 0 when the strip is empty.
     private(set) var width: CGFloat = 0
 
@@ -40,7 +53,7 @@ final class MiniStrip {
         panel.contentView = root
         for c in [more, shellChip] {
             root.addSubview(c)
-            c.onClick = { [weak self] in self?.onOpen?(nil) }
+            c.onClick = { [weak self] _ in self?.onOpen?(nil, 1) }
         }
     }
 
@@ -74,6 +87,7 @@ final class MiniStrip {
 
     /// Rebuilds the row when the set of minis or the chips change.
     private func refresh(now: Date) {
+        nextExpiry = all.compactMap { $0.endedAt?.addingTimeInterval(Self.linger) }.filter { $0 > now }.min()
         let list = pick(now: now)
         let shown = Array(list.prefix(Self.maxShown))
         for m in minis { if let a = shown.first(where: { $0.id == m.agent.id }) { m.agent = a } }
@@ -87,33 +101,35 @@ final class MiniStrip {
         minis = shown.map { a in old.first { $0.agent.id == a.id } ?? Mini(a) }
         for m in old where !minis.contains(where: { $0 === m }) { fadeOut(m.view) }
         let side = 32 * AppModel.shared.miniScale
+        let hit = max(side, Self.minHit)
         var x: CGFloat = 0
         for m in minis {
             if m.view.superview == nil {
                 root.addSubview(m.view)
                 let id = m.agent.id
-                m.view.onClick = { [weak self] in self?.onOpen?(id) }
+                m.view.onClick = { [weak self] n in self?.onOpen?(id, n) }
             }
-            m.view.frame = NSRect(x: x, y: 0, width: side, height: side)
+            m.view.frame = NSRect(x: x, y: 0, width: hit, height: hit)
+            m.image.frame = NSRect(x: (hit - side) / 2, y: 0, width: side, height: side)
             label(m)
-            x += side + Self.gap
+            x += hit + Self.gap
         }
-        x = place(more, text: extra > 0 ? "+\(extra)" : nil, at: x, side: side,
+        x = place(more, text: extra > 0 ? "+\(extra)" : nil, at: x,
                   a11y: "\(extra) more subagents of \(project)")
-        x = place(shellChip, text: shells > 0 ? ">_ \(shells)" : nil, at: x, side: side,
+        x = place(shellChip, text: shells > 0 ? ">_ \(shells)" : nil, at: x,
                   a11y: "\(shells) background \(shells == 1 ? "shell" : "shells") running in \(project)")
         width = x > 0 ? x - Self.gap : 0
-        panel.setContentSize(NSSize(width: max(width, 1), height: side))
-        root.frame = NSRect(x: 0, y: 0, width: max(width, 1), height: side)
+        panel.setContentSize(NSSize(width: max(width, 1), height: hit))
+        root.frame = NSRect(x: 0, y: 0, width: max(width, 1), height: hit)
         setVisible(visible)
     }
 
-    private func place(_ c: ChipView, text: String?, at x: CGFloat, side: CGFloat, a11y: String) -> CGFloat {
+    private func place(_ c: ChipView, text: String?, at x: CGFloat, a11y: String) -> CGFloat {
         c.isHidden = text == nil
         guard let text else { return x }
         c.label.stringValue = text
-        let w = ceil(c.label.intrinsicContentSize.width) + 10
-        let h = min(side, 18)
+        let w = max(ceil(c.label.intrinsicContentSize.width) + 10, Self.minHit)
+        let h = Self.minHit
         c.frame = NSRect(x: x, y: 0, width: w, height: h)
         c.label.frame = NSRect(x: 0, y: (h - c.label.intrinsicContentSize.height) / 2, width: w, height: c.label.intrinsicContentSize.height)
         c.setAccessibilityLabel(a11y)
@@ -121,8 +137,10 @@ final class MiniStrip {
     }
 
     private func label(_ m: Mini) {
-        m.view.setAccessibilityLabel("subagent \(m.agent.label) of \(project): \(m.agent.state.label)")
-        m.view.setAccessibilityHelp("Press to open the Activity list.")
+        let text = "subagent \(m.agent.label) of \(project): \(m.agent.state.label)"
+        guard text != m.a11y else { return }
+        m.a11y = text
+        m.view.setAccessibilityLabel(text)
     }
 
     private func fadeOut(_ v: NSView) {
@@ -136,7 +154,7 @@ final class MiniStrip {
     /// Next to the buddy's sprite, feet level, on the side with more room (grouped: always left, inside the slot).
     func step(dt: Double, sprite: NSRect, forceLeft: Bool) {
         guard !all.isEmpty || shells > 0 || width > 0 else { return }
-        if all.contains(where: { $0.endedAt != nil }) { refresh(now: Date()) }
+        if let e = nextExpiry, Date() >= e { refresh(now: Date()) }
         guard width > 0 else { return }
         let screen = (NSScreen.screens.first { $0.frame.intersects(sprite) } ?? NSScreen.main)?.visibleFrame ?? .zero
         onLeft = forceLeft || sprite.midX - screen.minX >= screen.maxX - sprite.midX
@@ -160,7 +178,7 @@ final class MiniStrip {
             guard index != m.frameIndex,
                   let (img, _) = model.director?.images.frame(sheet, frame: anim.frames[index], key: "\(names[0])#\(index)",
                                                               look: look, mirrored: !onLeft) else { continue }
-            m.view.layer?.contents = img
+            m.image.contents = img
             m.frameIndex = index
         }
     }
@@ -172,6 +190,7 @@ final class MiniStrip {
         case .asking: ["question"]
         case .done: ["done"]
         case .failed: ["error"]
+        case .stopped: ["goodbye", "idle"]
         }
     }
 }
@@ -179,7 +198,7 @@ final class MiniStrip {
 /// Small rounded label that opens the Activity tab on click or VoiceOver press.
 final class ChipView: NSView {
     let label = NSTextField(labelWithString: "")
-    var onClick: (() -> Void)?
+    var onClick: ((Int) -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -198,8 +217,8 @@ final class ChipView: NSView {
     override func updateLayer() { layer?.backgroundColor = NSColor(white: 0.12, alpha: 0.9).cgColor }
     override var wantsUpdateLayer: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func mouseUp(with event: NSEvent) { onClick?() }
-    override func accessibilityPerformPress() -> Bool { onClick?(); return true }
+    override func mouseUp(with event: NSEvent) { onClick?(event.clickCount) }
+    override func accessibilityPerformPress() -> Bool { onClick?(1); return true }
 }
 
 extension Subagent.State {
@@ -210,6 +229,7 @@ extension Subagent.State {
         case .asking: "has a question"
         case .done: "done"
         case .failed: "failed"
+        case .stopped: "stopped"
         }
     }
 
@@ -221,6 +241,7 @@ extension Subagent.State {
         case .asking: .asking
         case .done: .done
         case .failed: .error
+        case .stopped: .ended
         }
     }
 }

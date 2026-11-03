@@ -29,7 +29,7 @@ public enum HookInstaller {
         Spec(event: "UserPromptSubmit", matcher: nil, timeout: 5),
         Spec(event: "Stop", matcher: nil, timeout: 5),
         Spec(event: "Notification", matcher: nil, timeout: 5),
-        // The only blocking hook: it answers permissions and AskUserQuestion (W2 hand tests).
+        // The only blocking hook: it answers permissions and AskUserQuestion.
         Spec(event: "PermissionRequest", matcher: nil, timeout: 3600),
         // Agent/Task: the call's description names the subagent that starts next.
         Spec(event: "PreToolUse", matcher: "AskUserQuestion|Agent|Task", timeout: 5),
@@ -39,6 +39,8 @@ public enum HookInstaller {
         Spec(event: "SubagentStart", matcher: nil, timeout: 5),
         Spec(event: "SubagentStop", matcher: nil, timeout: 5),
     ]
+
+    public static var eventCount: Int { specs.count }
 
     static let hookSuffix = "/Contents/MacOS/buddy-hook"
     public static let backupsKept = 5
@@ -186,6 +188,17 @@ public enum HookInstaller {
 
     public static func status(settingsURL: URL, hookPath: String) -> Status {
         status(settings: try? Data(contentsOf: settingsURL.resolvingSymlinksInPath()), hookPath: hookPath)
+    }
+
+    /// Events that have no handler with exactly this hook's command.
+    public static func missingEvents(settings: Data?, hookPath: String) -> [String] {
+        let hooks = (try? hooksObject(parse(settings))) ?? [:]
+        let cmd = command(for: hookPath)
+        return specs.map(\.event).filter { event in
+            !(hooks[event] as? [Any] ?? []).contains { g in
+                ((g as? [String: Any])?["hooks"] as? [Any] ?? []).contains { ($0 as? [String: Any])?["command"] as? String == cmd }
+            }
+        }
     }
 
     public static func isInstalled(settingsURL: URL, hookPath: String) -> Bool {

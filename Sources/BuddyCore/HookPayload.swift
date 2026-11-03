@@ -1,6 +1,6 @@
 import Foundation
 
-/// Decodes only the payload fields the app uses (review L6, PF1). PermissionRequest `tool_input` stays whole:
+/// Decodes only the payload fields the app uses. PermissionRequest `tool_input` stays whole:
 /// the user must see all of it, and AskUserQuestion answers copy it back. Other events keep a few short
 /// `tool_input` keys, two `tool_response` ids, and the ids of `background_tasks`. The prompt never leaves the hook.
 public enum HookPayload {
@@ -16,8 +16,8 @@ public enum HookPayload {
                  notification_type, last_assistant_message, error, transcript_path, agent_id, agent_type
         }
         enum Big: String, CodingKey { case tool_input, permission_suggestions, tool_response, background_tasks, prompt }
-        enum InputKey: String, CodingKey { case description, subagent_type, command, task_id, run_in_background }
-        enum ResponseKey: String, CodingKey, CaseIterable { case agentId, backgroundTaskId }
+        enum InputKey: String, CodingKey { case description, subagent_type, command, task_id, file_path, run_in_background }
+        enum ResponseKey: String, CodingKey, CaseIterable { case agentId, backgroundTaskId, task_type }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Key.self)
@@ -32,7 +32,7 @@ public enum HookPayload {
                 return
             }
             if let input = try? big.nestedContainer(keyedBy: InputKey.self, forKey: .tool_input) {
-                var o = HookPayload.strings(input, [.description, .subagent_type, .command, .task_id])
+                var o = HookPayload.strings(input, [.description, .subagent_type, .command, .task_id, .file_path])
                 if let bg = try? input.decodeIfPresent(Bool.self, forKey: .run_in_background) {
                     o["run_in_background"] = .bool(bg)
                 }
@@ -52,6 +52,7 @@ public enum HookPayload {
             if fields["hook_event_name"] == "UserPromptSubmit", let prompt = try? big.decodeIfPresent(String.self, forKey: .prompt),
                let id = HookPayload.taskNotificationId(prompt) {
                 fields["task_id"] = .string(id)
+                if let status = HookPayload.tag("status", in: prompt, max: 20, extra: []) { fields["task_status"] = .string(status) }
             }
         }
     }
@@ -68,11 +69,17 @@ public enum HookPayload {
 
     /// `<task-id>` of a synthetic `<task-notification>` prompt (a background task ended). Only an id-like value.
     static func taskNotificationId(_ prompt: String) -> String? {
-        guard prompt.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<task-notification>"),
-              let a = prompt.range(of: "<task-id>"), let b = prompt.range(of: "</task-id>", range: a.upperBound..<prompt.endIndex) else { return nil }
-        let id = String(prompt[a.upperBound..<b.lowerBound])
-        let ok = !id.isEmpty && id.count <= 64 && id.unicodeScalars.allSatisfy { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_") }
-        return ok ? id : nil
+        guard prompt.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<task-notification>") else { return nil }
+        return tag("task-id", in: prompt, max: 64, extra: ["-", "_"])
+    }
+
+    /// The first `<name>…</name>` value, only when it is 1…`max` ASCII letters, digits, or `extra` characters.
+    static func tag(_ name: String, in prompt: String, max: Int, extra: Set<Character>) -> String? {
+        guard let a = prompt.range(of: "<\(name)>"),
+              let b = prompt.range(of: "</\(name)>", range: a.upperBound..<prompt.endIndex) else { return nil }
+        let v = String(prompt[a.upperBound..<b.lowerBound])
+        let ok = !v.isEmpty && v.count <= max && v.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || extra.contains($0)) }
+        return ok ? v : nil
     }
 
     public static func decode(_ data: Data) throws -> JSONValue {

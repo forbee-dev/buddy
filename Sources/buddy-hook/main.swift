@@ -7,10 +7,10 @@ signal(SIGPIPE, SIG_IGN)
 
 #if DEBUG
 let debugBuild = true
-let appNames = ["Buddy", "BuddyApp"]
+let appNames = HookTrust.debugNames
 #else
 let debugBuild = false
-let appNames = ["Buddy"]
+let appNames = HookTrust.releaseNames
 #endif
 
 func gatherEnv() -> HookEnv {
@@ -32,14 +32,11 @@ func gatherEnv() -> HookEnv {
         entrypoint: e["CLAUDE_CODE_ENTRYPOINT"])
 }
 
-/// The listener must be our own user running the Buddy binary next to this hook (review M1).
 /// Debug builds with `BUDDY_SOCKET` (tests) check the user only.
 func trustedServer(_ fd: Int32) -> Bool {
-    guard PeerCheck.peerUid(fd) == getuid() else { return false }
-    if debugBuild && ProcessInfo.processInfo.environment["BUDDY_SOCKET"] != nil { return true }
-    guard let me = PeerCheck.path(of: getpid()) else { return false }
-    let dir = (me as NSString).deletingLastPathComponent
-    return PeerCheck.peerIs(fd, oneOf: appNames.map { dir + "/" + $0 })
+    if debugBuild && ProcessInfo.processInfo.environment["BUDDY_SOCKET"] != nil { return PeerCheck.peerUid(fd) == getuid() }
+    return HookTrust.serverAllowed(peerUid: PeerCheck.peerUid(fd), ownUid: getuid(), peerPath: PeerCheck.peerPid(fd).flatMap(PeerCheck.path(of:)),
+                                   selfPath: PeerCheck.path(of: getpid()), names: appNames)
 }
 
 func run() throws {
@@ -55,7 +52,7 @@ func run() throws {
     UnixSocket.setSendTimeout(fd, seconds: 1)
     try UnixSocket.writeAll(fd, line)
     guard wantsReply else {
-        // Stay alive until the app has checked this process and closes (review S1); 1 s cap.
+        // Stay alive until the app has checked this process and closes; 1 s cap.
         shutdown(fd, SHUT_WR)
         UnixSocket.setReceiveTimeout(fd, seconds: 1)
         UnixSocket.drainUntilClose(fd)

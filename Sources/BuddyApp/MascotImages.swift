@@ -5,6 +5,14 @@ import BuddyCore
 @MainActor
 enum MascotImages {
     private static var thumbs: [Look: NSImage] = [:]
+    /// The menu bar icon, plain and filled; built once per sprite sheet.
+    private static var icons: [Bool: NSImage] = [:]
+
+    /// The sprites or skins changed.
+    static func clear() {
+        thumbs.removeAll()
+        icons.removeAll()
+    }
 
     static func cgImage(_ sheet: SpriteSheet, look: Look, state: String = "idle") -> (CGImage, RenderedFrame)? {
         guard let frame = sheet.anim(base: look.base, chain: [state])?.frames.first else { return nil }
@@ -28,7 +36,8 @@ enum MascotImages {
 
     /// Template icon from the first base's idle silhouette. `filled` (attention) adds a dot.
     static func menuIcon(_ sheet: SpriteSheet?, filled: Bool) -> NSImage {
-        guard let sheet, let base = sheet.baseNames.first, let palette = sheet.paletteNames.first,
+        if sheet != nil, let hit = icons[filled] { return hit }
+        guard let sheet, let base = sheet.baseNames.first(where: { !$0.contains("/") }), let palette = sheet.paletteNames.first,
               let (_, r) = cgImage(sheet, look: Look(base: base, palette: palette, outfit: nil)) else {
             return NSImage(systemSymbolName: filled ? "face.smiling.inverse" : "face.smiling", accessibilityDescription: "Buddy") ?? NSImage()
         }
@@ -43,6 +52,7 @@ enum MascotImages {
         image.addRepresentation(rep)
         image.isTemplate = true
         image.accessibilityDescription = filled ? "Buddy, a session needs you" : "Buddy"
+        icons[filled] = image
         return image
     }
 }

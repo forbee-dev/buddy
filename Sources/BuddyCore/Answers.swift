@@ -53,7 +53,7 @@ public enum HookOutput {
         return decision(["behavior": .string("allow"), "updatedInput": .object(updated)])
     }
 
-    /// multiSelect answers are one string joined with ", " (TESTED, W2 H1).
+    /// multiSelect answers are one string joined with ", " (TESTED).
     public static func answerText(selected: [String], other: String) -> String {
         let extra = other.trimmingCharacters(in: .whitespacesAndNewlines)
         return (selected + (extra.isEmpty ? [] : [extra])).joined(separator: ", ")

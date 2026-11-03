@@ -23,6 +23,13 @@ const listen = (sockPath: string, onData: (s: net.Socket, line: string) => void)
     });
     srv.listen(sockPath, () => res(srv));
   });
+const logWaiter = () => {
+  const waiters: [string, () => void][] = [];
+  return {
+    log: (m: string) => waiters.slice().forEach((w) => m.includes(w[0]) && (waiters.splice(waiters.indexOf(w), 1), w[1]())),
+    once: (part: string) => new Promise<void>((r) => waiters.push([part, r])),
+  };
+};
 const close = (s: net.Server) =>
   new Promise((r) => {
     s.close(r);
@@ -42,11 +49,13 @@ test("sends hello, replies to requests, reconnects after server restart", async 
       s.write('{"kind":"focus","reqId":"q","shellPid":1}\n');
     } else acks.push(m);
   };
+  const lw = logWaiter();
+  const unreachable = lw.once("not reachable");
   const client = new BuddyClient({
     socketPath: sock,
     minDelayMs: 20,
     maxDelayMs: 50,
-    log: () => {},
+    log: lw.log,
     hello: async () => ({ kind: "ext-hello", terminals: [], workspaceFolders: ["/p/app"] }),
     onLine: (l) => ({ kind: "ack", reqId: JSON.parse(l).reqId, ok: true }),
   });
@@ -57,7 +66,7 @@ test("sends hello, replies to requests, reconnects after server restart", async 
   try {
     // Client starts before the server exists: must retry quietly.
     client.start();
-    await new Promise((r) => setTimeout(r, 100));
+    await unreachable;
     let srv = await listen(sock, onData);
     await waitFor(() => hellos.length === 1);
     assert.deepEqual(hellos[0].workspaceFolders, ["/p/app"]);
@@ -81,9 +90,11 @@ test("send before hello resolves is queued behind hello", async () => {
   const srv = await listen(sock, (_s, line) => kinds.push(JSON.parse(line).kind));
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));
+  const lw = logWaiter();
+  const connected = lw.once("connected");
   const client = new BuddyClient({
     socketPath: sock,
-    log: () => {},
+    log: lw.log,
     hello: async () => {
       await gate;
       return { kind: "ext-hello" };
@@ -93,7 +104,7 @@ test("send before hello resolves is queued behind hello", async () => {
   });
   try {
     client.start();
-    await new Promise((r) => setTimeout(r, 150));
+    await connected;
     assert.deepEqual(kinds, []);
     release();
     for (let i = 0; i < 100 && kinds.length < 2; i++) await new Promise((r) => setTimeout(r, 20));

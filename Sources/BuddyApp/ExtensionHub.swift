@@ -4,7 +4,7 @@ import BuddyCore
 /// Connected VS Code / Cursor extensions and their terminals.
 @MainActor
 final class ExtensionHub {
-    private struct Client { let conn: Connection; var editor: String; var terminals: [ExtTerminal]; var folders: [String] }
+    private struct Client { let conn: Connection; var editor: String; var version: String; var terminals: [ExtTerminal]; var folders: [String] }
     private var clients: [ObjectIdentifier: Client] = [:]
     private var acks: [String: (conn: ObjectIdentifier, cont: CheckedContinuation<AckMessage, Never>)] = [:]
     /// The editor app process above the extension peer; claimed terminals must descend from it.
@@ -14,7 +14,8 @@ final class ExtensionHub {
     func hello(_ m: ExtHelloMessage, from conn: Connection) {
         let root = conn.peerPid.flatMap(Jumper.terminalApp(above:))?.processIdentifier
         roots[ObjectIdentifier(conn)] = root
-        clients[ObjectIdentifier(conn)] = Client(conn: conn, editor: m.editor, terminals: owned(m.terminals, root: root),
+        clients[ObjectIdentifier(conn)] = Client(conn: conn, editor: m.editor, version: Activity.clip(m.version, 32),
+                                                   terminals: owned(m.terminals, root: root),
                                                    folders: JumpTarget.validFolders(m.workspaceFolders))
         log.info("Extension connected: \(m.editor, privacy: .public) \(m.version, privacy: .public)")
         onChange?()
@@ -45,6 +46,7 @@ final class ExtensionHub {
     }
 
     var connectedEditors: [String] { clients.values.map(\.editor) }
+    var clientVersions: [(editor: String, version: String)] { clients.values.map { ($0.editor, $0.version) } }
 
     private func client(forShell pid: Int32) -> Client? {
         clients.values.first { $0.terminals.contains { $0.shellPid == pid } }
@@ -57,6 +59,8 @@ final class ExtensionHub {
     }
 
     func hasTerminal(shellPid: Int32) -> Bool { client(forShell: shellPid) != nil }
+
+    var shellPids: Set<Int32> { Set(clients.values.flatMap { $0.terminals.map(\.shellPid) }) }
 
     func ack(_ m: AckMessage) { acks.removeValue(forKey: m.reqId)?.cont.resume(returning: m) }
 
