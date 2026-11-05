@@ -203,8 +203,7 @@ final class MascotController {
         let oldState: SessionState? = sessionChanged ? nil : spec.state
         spec = new
         showTag()
-        badge.isHidden = new.badge == 0
-        badge.stringValue = "\(new.badge)"
+        showBadge()
         updateLabel()
         minis.update(subagents: new.subagents, shells: new.shells,
                      project: new.sessionId.flatMap { model.session($0)?.projectName } ?? new.label, look: new.look)
@@ -224,8 +223,18 @@ final class MascotController {
         sprite.setAccessibilityCustomActions(spec.sleeping ? [] : actions)
     }
 
+    private var showsDoneBadge: Bool { spec.key != "single" && spec.state == .done && spec.badge > 0 }
+
+    private func showBadge() {
+        badge.isHidden = spec.badge == 0
+        badge.stringValue = showsDoneBadge ? "✓" : "\(spec.badge)"
+        // Green matches the sprite check; white text keeps contrast on light and dark.
+        let color = showsDoneBadge ? NSColor(srgbRed: 0.10, green: 0.50, blue: 0.20, alpha: 1) : NSColor(srgbRed: 0.70, green: 0.0, blue: 0.0, alpha: 1)
+        badge.layer?.backgroundColor = color.cgColor
+    }
+
     private func updateLabel() {
-        let count = spec.badge > 0 ? ", \(spec.badge) waiting" : ""
+        let count = spec.badge > 0 ? (showsDoneBadge ? ", finished" : ", \(spec.badge) waiting") : ""
         let place = position.map { ", position \($0.n) of \($0.of)" } ?? ""
         let wait = waitText.isEmpty ? "" : ", \(waitText)"
         let state = spec.sleeping ? "sleeping" : spec.state.label
@@ -290,6 +299,9 @@ final class MascotController {
     /// A mascot with an open card does not walk away from under the cursor.
     func cardChanged(from old: SessionState? = nil) {
         guard let sid = spec.sessionId, let s = model.session(sid) else { return }
+        if ConfettiGate.shouldBurst(from: old, to: spec.state, reduceMotion: model.reduceMotion, hidden: model.buddiesHidden, live: ConfettiBurst.live) {
+            ConfettiBurst.play(around: spriteScreenRect, scale: scale)
+        }
         if let p = s.pending {
             walkTarget = nil
             let wasOpen = bubble != nil

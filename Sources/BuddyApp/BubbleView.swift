@@ -88,7 +88,8 @@ struct BubbleView: View {
     /// Activity is the default only when nothing waits for the user.
     private func activeTab(_ s: Session) -> BubbleTab {
         if let t = selection.tab, selection.tabFor == s.pending?.id, s.hasActivity { return t }
-        return s.pending == nil && s.hasActivity ? .activity : .card
+        // A finished turn shows its done card first; Activity stays one click away.
+        return s.pending == nil && s.hasActivity && s.state != .done ? .activity : .card
     }
 
     private func tabs(_ s: Session) -> some View {

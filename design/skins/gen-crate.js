@@ -51,6 +51,7 @@ const FIRE = [
   ['...R...', '..RR...', '..ROR..', '.ROOOR.', '.ROONOR', 'ROONNOR', 'ROONNOR', '.RRRRR.'],
   ['....R..', '...RR..', '..ROR..', '..ROOR.', '.ROONOR', 'ROONNOR', 'ROONNOR', '.RRRRR.'],
 ];
+const CHECK = (x0, y0) => shape(x0, y0, ['......KK', '.....KGK', 'KK..KGK.', 'KGKKGK..', '.KGGK...', '..KK....']);
 const ZS = (x, y) => shape(x, y, ['UUUU', '...U', '..U.', '.U..', 'UUUU']);
 const ZB = (x, y) => shape(x, y, ['VVVVV', '...V.', '..V..', '.V...', 'VVVVV']);
 const CF = { x: [2, 6, 11, 17, 23, 28, 4, 14, 20, 29], y: [2, 0, 4, 1, 3, 0, 6, 8, 6, 9] };
@@ -59,7 +60,7 @@ function confetti(g, f, body) {
   if (f < 1) return;
   for (let i = 0; i < 10; i++) {
     const x = CF.x[i], y = CF.y[i] + (f - 1) * 3;
-    for (const px of i % 2 ? [x] : [x, x + 1]) for (const py of [y, y + 1]) if (body[py]?.[px] === '.') put(g, px, py, CFC[i % 6]);
+    for (const px of i % 2 ? [x] : [x, x + 1]) for (const py of [y, y + 1]) if (body[py]?.[px] === '.' && g[py][px] === '.') put(g, px, py, CFC[i % 6]);
   }
 }
 
@@ -122,11 +123,11 @@ const S = {
     { dy: 1, face: 'wide', fx: [BUBBLE(25, 1)] }] },
   done: { loop: false, frames: [
     { dy: 1, face: 'sparkle' },
-    { dy: -2, face: 'check', armL: 'up', armR: 'upw', confetti: 1 },
-    { dy: -3, face: 'check', armL: 'upw', armR: 'up', confetti: 2 },
-    { dy: -2, face: 'check', armL: 'up', armR: 'upw', confetti: 3 },
-    { face: 'happy', armL: 'upw', armR: 'up', confetti: 4 },
-    { dy: 1, face: 'happy', armL: 'out', armR: 'out', confetti: 5 }] },
+    { dy: -2, face: 'check', armL: 'up', armR: 'upw', fx: [CHECK(24, 0)], confetti: 1 },
+    { dy: -3, face: 'check', armL: 'upw', armR: 'up', fx: [CHECK(24, 0)], confetti: 2 },
+    { dy: -2, face: 'check', armL: 'up', armR: 'upw', fx: [CHECK(24, 0)], confetti: 3 },
+    { face: 'happy', armL: 'upw', armR: 'up', fx: [CHECK(24, 0)], confetti: 4 },
+    { dy: 1, face: 'happy', armL: 'out', armR: 'out', fx: [CHECK(24, 0)], confetti: 5 }] },
   sleep: { loop: true, noLegs: true, frames: [
     { dy: 2, face: saverFace(0), fx: [ZS(27, 12)] },
     { dy: 2, face: saverFace(1), fx: [ZS(27, 10)] },

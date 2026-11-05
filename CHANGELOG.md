@@ -5,6 +5,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-05
+
+### Changed
+- The done card opens on the done view, not on Activity, when the session ran subagents.
+- A done buddy shows a green check badge. Before, it showed a red count.
+- The Crate and Bee hold a green check when they are done.
+- A buddy throws a short confetti burst out of its frame when Claude finishes. Reduce Motion turns it off.
+
 ## [0.5.0] - 2026-11-05
 
 ### Changed

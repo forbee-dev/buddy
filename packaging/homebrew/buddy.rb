@@ -1,6 +1,6 @@
 cask "buddy" do
-  version "0.5.0"
-  sha256 "f3550c89b3e811379dce2542ba7d4a5d27cece45fdb71cacf72e7a98cb333205"
+  version "0.5.1"
+  sha256 "492b6d1634e44be87188730c24cf0a18984b8315b813e7768907b1fb851eb64d"
 
   url "https://github.com/forbee-dev/buddy/releases/download/v#{version}/Buddy-#{version}.dmg"
   name "Buddy"
