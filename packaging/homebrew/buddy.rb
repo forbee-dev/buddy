@@ -7,7 +7,7 @@ cask "buddy" do
   desc "Pixel mascot for every Claude Code session"
   homepage "https://github.com/forbee-dev/buddy"
 
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "Buddy.app"
 
