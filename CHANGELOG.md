@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-05
+
 ### Added
 - Settings → General → **Show plan usage**: a "5h 23% · 7d 41%" chip with the claude.ai 5-hour and 7-day limits in the bubble, the tooltip, the menu and the palette, through a status line bridge that keeps your own status line command working, plus one notification when a window passes 90%. Off by default.
 - Universal binary: Buddy runs native on Apple silicon and Intel Macs.
@@ -169,7 +171,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 - Next prompt through the VS Code and Cursor companion extension, or the Claude Code inbox socket.
 - Sprites as JSON: palettes, outfits and an effects layer.
 
-[Unreleased]: https://github.com/forbee-dev/buddy/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/forbee-dev/buddy/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/forbee-dev/buddy/compare/v0.5.1...v1.0.0
 [0.5.1]: https://github.com/forbee-dev/buddy/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/forbee-dev/buddy/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/forbee-dev/buddy/compare/v0.3.0...v0.4.0
