@@ -193,6 +193,12 @@ final class BubbleController {
         if focus { panel.makeKey() }
     }
 
+    /// Pointer on the card, keyboard focus, or a typed prompt: the user touches it, so it must stay.
+    var isAttended: Bool {
+        panel.isKeyWindow || NSMouseInRect(NSEvent.mouseLocation, panel.frame, false)
+            || !selection.prompt.isEmpty || NSWorkspace.shared.isVoiceOverEnabled
+    }
+
     func retarget(_ sid: String) { selection.switchTo(sid) }
 
     func showActivity(highlight: String?) {

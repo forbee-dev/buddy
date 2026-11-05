@@ -3,6 +3,12 @@
 All notable changes to Buddy are in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- The done card opens by itself when a session finishes a turn. It takes no keyboard focus. It closes after 8 seconds if you do not touch it.
+- The done sprite plays once and holds its last frame while the session stays done.
+
 ## [0.4.0] - 2026-11-04
 
 ### Added

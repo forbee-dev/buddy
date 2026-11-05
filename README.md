@@ -59,7 +59,7 @@ Click a mascot and a bubble card opens. Double-click a mascot (or its name tag) 
 
 - **Permission card.** It shows the full tool input. It warns you when the sandbox is off. It makes hidden Unicode visible. Buttons: Allow, Deny (with an optional reason), Always allow (only the options Claude itself suggests), and Answer in terminal.
 - **Question card.** One question at a time, with numbered options. Press `1` to `9` to pick one. Picking never moves on by itself: use Next, `↩` or `←` / `→`. Options can carry a preview, such as a code snippet. Single choice uses radio buttons, multiple choice uses checkboxes, and Other takes free text. A review step comes last.
-- **Done card.** It shows Claude's last message and a "Next prompt" box. Send types the prompt into the session. Jump takes you to the right place.
+- **Done card.** It shows Claude's last message and a "Next prompt" box. Send types the prompt into the session. Jump takes you to the right place. The card opens by itself when Claude finishes. It never takes keyboard focus. It closes after 8 seconds, unless you touch it: point at it, click it, type in it, or focus it.
 
 Jump focuses the right terminal tab or editor window. For Claude Desktop, Jump brings the app to the front. Claude Desktop has no per-session link, so that is as close as it gets.
 

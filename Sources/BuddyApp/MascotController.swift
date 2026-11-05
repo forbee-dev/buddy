@@ -28,6 +28,8 @@ final class MascotController {
     private var finishedKey: String?
     /// The next idle walk: one delayed task, so a buddy that stands still needs no tick.
     private var wanderTask: Task<Void, Never>?
+    /// Closes a done card that opened by itself and stayed untouched.
+    private var autoCloseTask: Task<Void, Never>?
     private var current: RenderedFrame?
     private var sliding = false
     private var bubble: BubbleController?
@@ -198,6 +200,7 @@ final class MascotController {
     func update(_ new: MascotSpec) {
         let sessionChanged = new.sessionId != spec.sessionId
         let stateChanged = new.state != spec.state || sessionChanged
+        let oldState: SessionState? = sessionChanged ? nil : spec.state
         spec = new
         showTag()
         badge.isHidden = new.badge == 0
@@ -211,7 +214,8 @@ final class MascotController {
         if new.state == .ended { leave(); return }
         guard stateChanged else { return }
         finishedKey = nil
-        cardChanged()
+        autoCloseTask?.cancel()
+        cardChanged(from: oldState)
     }
 
     private func updateActions() {
@@ -282,9 +286,9 @@ final class MascotController {
         director.controllers.values.contains { $0 !== self && abs($0.centerX - centerX) < TagLayout.minDistance(footprint, $0.footprint) }
     }
 
-    /// Opens the bubble on its own (without focus) only for a pending request; "done" gets a badge and animation.
+    /// Opens the bubble on its own (without focus) for a pending request, and for a new done state (see `DoneAutoCard`).
     /// A mascot with an open card does not walk away from under the cursor.
-    func cardChanged() {
+    func cardChanged(from old: SessionState? = nil) {
         guard let sid = spec.sessionId, let s = model.session(sid) else { return }
         if let p = s.pending {
             walkTarget = nil
@@ -292,6 +296,9 @@ final class MascotController {
             showBubble(focus: false)
             let who = p.agentId.map { "\(s.subagentLabel($0)) (subagent)" } ?? "Claude"
             if !wasOpen { Announcer.say("\(s.projectName): \(p.kind == .question ? "\(who) has a question" : "\(who) wants to run \(DisplayText.reveal(p.toolName))")") }
+        } else if DoneAutoCard.shouldOpen(from: old, to: spec.state, hasPending: false, cardOpen: bubble != nil, hidden: model.buddiesHidden) {
+            showBubble(focus: false)
+            autoClose()
         } else if spec.state.needsAttention, !director.grouped, isCrowded(), !model.reduceMotion {
             walkTarget = director.freeX(width: footprint, excluding: self) - panelSize.width / 2
             director.wake()
@@ -299,6 +306,23 @@ final class MascotController {
     }
 
     // MARK: Bubble
+
+    private func autoClose() {
+        guard let card = bubble else { return }
+        autoCloseTask?.cancel()
+        autoCloseTask = Task { [weak self] in
+            var elapsed = 0.0
+            var touched = false
+            while !DoneAutoCard.shouldClose(elapsed: elapsed, touched: touched) && !touched {
+                guard (try? await Task.sleep(for: .milliseconds(250))) != nil, let self, bubble === card else { return }
+                elapsed += 0.25
+                touched = card.isAttended
+            }
+            guard !touched, let self, bubble === card else { return }
+            card.close()
+            bubble = nil
+        }
+    }
 
     func showBubble(focus: Bool) {
         guard spec.sessionId != nil, !model.buddiesHidden || focus else { return }
@@ -520,7 +544,8 @@ extension MascotController {
 
     private var canWander: Bool {
         guard !pinned, !isLeaving, !dragging, slot == nil, model.walking, !model.reduceMotion, !spec.sleeping, digest == nil else { return false }
-        return spec.state == .idle || spec.state == .starting || (spec.state == .done && finishedKey == "done")
+        // Not while done: each walk back to the held pose would replay the confetti.
+        return spec.state == .idle || spec.state == .starting
     }
 
     /// Runs from the tick and from `park`; at most one walk waits at a time.
@@ -556,7 +581,8 @@ extension MascotController {
         case .working: return ["working"]
         case .needsPermission: return ["permission", "question"]
         case .asking: return ["question"]
-        case .done: return finishedKey == "done" ? ["idle"] : ["done"]
+        // The last frame (grin and check) holds while the session stays done; idle hid it after 1 s.
+        case .done: return ["done"]
         case .error: return ["error"]
         case .ended: return ["goodbye"]
         case .idle, .starting: return ["idle"]
