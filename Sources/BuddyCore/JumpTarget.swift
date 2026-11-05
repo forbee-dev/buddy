@@ -6,6 +6,17 @@ public enum JumpTarget {
         public var folder: String
         /// True when an extension reported the folder as open, so the CLI cannot create a new window.
         public var isOpen: Bool
+        /// Saved workspace file of the window that holds `folder`, for the title match.
+        public var workspaceFile: String?
+        /// What the editor CLI may open. Nil when only a new window could result (multi-root without a saved file).
+        public var cliTarget: String?
+    }
+
+    /// One editor window as its extension reports it.
+    public struct Window: Equatable, Sendable {
+        public var folders: [String]
+        public var workspaceFile: String?
+        public init(folders: [String], workspaceFile: String?) { self.folders = folders; self.workspaceFile = workspaceFile }
     }
 
     public static let maxFolders = 20
@@ -14,6 +25,12 @@ public enum JumpTarget {
     /// Keeps absolute paths only, at most 20, each at most 1024 chars.
     public static func validFolders(_ raw: [String]?) -> [String] {
         Array((raw ?? []).filter { $0.hasPrefix("/") && $0.count <= maxFolderLength && !$0.contains("\0") }.prefix(maxFolders))
+    }
+
+    /// Keeps an absolute `.code-workspace` path of at most 1024 chars.
+    public static func validWorkspaceFile(_ raw: String?) -> String? {
+        guard let raw, raw.hasPrefix("/"), raw.count <= maxFolderLength, !raw.contains("\0"), raw.hasSuffix(".code-workspace") else { return nil }
+        return raw
     }
 
     static func contains(_ folder: String, _ path: String) -> Bool {
@@ -26,10 +43,15 @@ public enum JumpTarget {
     }
 
     /// Owner client folder, else the longest known folder holding the cwd, else the cwd.
-    public static func pick(ownerFolders: [String]?, allFolders: [String], cwd: String) -> Pick {
-        if let owner = ownerFolders, let f = longestPrefix(of: cwd, in: owner) ?? owner.first { return Pick(folder: f, isOpen: true) }
-        if let f = longestPrefix(of: cwd, in: allFolders) { return Pick(folder: f, isOpen: true) }
-        return Pick(folder: cwd, isOpen: false)
+    public static func pick(owner: Window?, all: [Window], cwd: String) -> Pick {
+        func make(_ f: String, _ w: Window) -> Pick {
+            Pick(folder: f, isOpen: true, workspaceFile: w.workspaceFile,
+                 cliTarget: w.workspaceFile ?? (w.folders.count > 1 ? nil : f))
+        }
+        if let o = owner, let f = longestPrefix(of: cwd, in: o.folders) ?? o.folders.first { return make(f, o) }
+        let hits = all.compactMap { w in longestPrefix(of: cwd, in: w.folders).map { ($0, w) } }
+        if let (f, w) = hits.max(by: { $0.0.count < $1.0.count }) { return make(f, w) }
+        return Pick(folder: cwd, isOpen: false, workspaceFile: nil, cliTarget: cwd)
     }
 
     /// Plain folder argument: the editor focuses the window that has it open. Never a shell string.

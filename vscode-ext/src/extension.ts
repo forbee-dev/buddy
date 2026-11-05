@@ -25,6 +25,12 @@ const workspaceFolders = (): string[] =>
     .filter((p) => p.length <= 1024)
     .slice(0, 20);
 
+/** Saved workspace file of the window; untitled and remote workspaces give undefined. */
+const workspaceFile = (): string | undefined => {
+  const u = vscode.workspace.workspaceFile;
+  return u?.scheme === "file" && u.fsPath.length <= 1024 ? u.fsPath : undefined;
+};
+
 export function activate(ctx: vscode.ExtensionContext): void {
   const out = vscode.window.createOutputChannel("Buddy");
   const log = (m: string) => out.appendLine(`${new Date().toISOString()} ${m}`);
@@ -57,6 +63,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       version: ctx.extension.packageJSON.version,
       terminals: publicList(await refresh()),
       workspaceFolders: workspaceFolders(),
+      workspaceFile: workspaceFile(),
     }),
     onLine: async (line) => {
       await refresh();
@@ -68,7 +75,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   const push = () =>
     void refresh()
-      .then((l) => client.send({ kind: "ext-terminals", terminals: publicList(l), workspaceFolders: workspaceFolders() }))
+      .then((l) => client.send({ kind: "ext-terminals", terminals: publicList(l), workspaceFolders: workspaceFolders(), workspaceFile: workspaceFile() }))
       .catch((e) => log(`push failed: ${String(e)}`));
   ctx.subscriptions.push(
     out,

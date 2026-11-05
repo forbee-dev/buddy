@@ -4,7 +4,7 @@ import BuddyCore
 /// Connected VS Code / Cursor extensions and their terminals.
 @MainActor
 final class ExtensionHub {
-    private struct Client { let conn: Connection; var editor: String; var version: String; var terminals: [ExtTerminal]; var folders: [String] }
+    private struct Client { let conn: Connection; var editor: String; var version: String; var terminals: [ExtTerminal]; var folders: [String]; var workspaceFile: String? }
     private var clients: [ObjectIdentifier: Client] = [:]
     private var acks: [String: (conn: ObjectIdentifier, cont: CheckedContinuation<AckMessage, Never>)] = [:]
     /// The editor app process above the extension peer; claimed terminals must descend from it.
@@ -16,7 +16,8 @@ final class ExtensionHub {
         roots[ObjectIdentifier(conn)] = root
         clients[ObjectIdentifier(conn)] = Client(conn: conn, editor: m.editor, version: Activity.clip(m.version, 32),
                                                    terminals: owned(m.terminals, root: root),
-                                                   folders: JumpTarget.validFolders(m.workspaceFolders))
+                                                   folders: JumpTarget.validFolders(m.workspaceFolders),
+                                                   workspaceFile: JumpTarget.validWorkspaceFile(m.workspaceFile))
         // Socket text is untrusted: logged clipped.
         log.info("Extension connected: \(Activity.clip(m.editor, 32), privacy: .public) \(Activity.clip(m.version, 32), privacy: .public)")
         onChange?()
@@ -25,7 +26,10 @@ final class ExtensionHub {
     func terminals(_ m: ExtTerminalsMessage, from conn: Connection) {
         let id = ObjectIdentifier(conn)
         clients[id]?.terminals = owned(m.terminals, root: roots[id])
-        if let f = m.workspaceFolders { clients[id]?.folders = JumpTarget.validFolders(f) }
+        if let f = m.workspaceFolders {
+            clients[id]?.folders = JumpTarget.validFolders(f)
+            clients[id]?.workspaceFile = JumpTarget.validWorkspaceFile(m.workspaceFile)
+        }
         onChange?()
     }
 
@@ -55,8 +59,8 @@ final class ExtensionHub {
 
     /// Window folder to raise: see `JumpTarget.pick`.
     func jumpTarget(shellPid: Int32?, cwd: String) -> JumpTarget.Pick {
-        let owner = shellPid.flatMap(client(forShell:))?.folders
-        return JumpTarget.pick(ownerFolders: owner, allFolders: clients.values.flatMap(\.folders), cwd: cwd)
+        func window(_ c: Client) -> JumpTarget.Window { .init(folders: c.folders, workspaceFile: c.workspaceFile) }
+        return JumpTarget.pick(owner: shellPid.flatMap(client(forShell:)).map(window), all: clients.values.map(window), cwd: cwd)
     }
 
     func hasTerminal(shellPid: Int32) -> Bool { client(forShell: shellPid) != nil }

@@ -56,7 +56,7 @@ test("sends hello, replies to requests, reconnects after server restart", async 
     minDelayMs: 20,
     maxDelayMs: 50,
     log: lw.log,
-    hello: async () => ({ kind: "ext-hello", terminals: [], workspaceFolders: ["/p/app"] }),
+    hello: async () => ({ kind: "ext-hello", terminals: [], workspaceFolders: ["/p/app"], workspaceFile: "/p/a.code-workspace" }),
     onLine: (l) => ({ kind: "ack", reqId: JSON.parse(l).reqId, ok: true }),
   });
   const waitFor = async (f: () => boolean) => {
@@ -70,6 +70,7 @@ test("sends hello, replies to requests, reconnects after server restart", async 
     let srv = await listen(sock, onData);
     await waitFor(() => hellos.length === 1);
     assert.deepEqual(hellos[0].workspaceFolders, ["/p/app"]);
+    assert.equal(hellos[0].workspaceFile, "/p/a.code-workspace");
     await waitFor(() => acks.length === 1);
     assert.deepEqual(acks[0], { kind: "ack", reqId: "q", ok: true });
     await close(srv);

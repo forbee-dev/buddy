@@ -5,6 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 
 ## [Unreleased]
 
+### Fixed
+- Jump raises the existing Cursor or VS Code window of a multi-root workspace. It no longer opens a new window. Install companion extension 0.1.5 for saved `.code-workspace` files.
+
 ### Changed
 - Notification banners only show while the buddies are hidden, the screen is asleep or you are away, because the buddy already tells you. Settings → Notifications → **Also while the buddies are on screen** brings them back.
 

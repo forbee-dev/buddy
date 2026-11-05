@@ -82,12 +82,15 @@ public struct ExtHelloMessage: Codable, Sendable, Equatable {
     public var terminals: [ExtTerminal]
     /// Absent from extensions older than 0.1.2.
     public var workspaceFolders: [String]?
+    /// Absent from extensions older than 0.1.5 and from windows without a saved workspace file.
+    public var workspaceFile: String?
 }
 
 public struct ExtTerminalsMessage: Codable, Sendable, Equatable {
     public var kind = "ext-terminals"
     public var terminals: [ExtTerminal]
     public var workspaceFolders: [String]?
+    public var workspaceFile: String?
 }
 
 public struct SendMessage: Codable, Sendable, Equatable {

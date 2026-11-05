@@ -58,7 +58,8 @@ enum Jumper {
         log.info("Jump: route=editor-window ax-trusted=\(trusted ? "yes" : "no", privacy: .public) folder-known=\(pick.isOpen ? "yes" : "no", privacy: .public)")
         if trusted, let app {
             let folderName = (pick.folder as NSString).lastPathComponent
-            let names = [folderName, projectName].filter { !$0.isEmpty }
+            let workspaceName = pick.workspaceFile.map { (($0 as NSString).lastPathComponent as NSString).deletingPathExtension } ?? ""
+            let names = [workspaceName, folderName, projectName].filter { !$0.isEmpty }
             let pid = app.processIdentifier
             guard fresh() else { return true }
             let matched = await Task.detached { names.contains { raiseWindow(pid: pid, titleContains: $0) } }.value
@@ -66,18 +67,20 @@ enum Jumper {
             guard fresh() else { return true }
             if matched { activate(app); return true }
         }
-        if pick.isOpen {
-            let used = runEditorCLI(terminal: terminal, folder: pick.folder)
+        if !pick.isOpen {
+            log.info("Jump: folder not open in any window; cli skipped")
+        } else if let target = pick.cliTarget {
+            let used = runEditorCLI(terminal: terminal, folder: target)
             log.info("Jump: cli-used=\(used ? "yes" : "no", privacy: .public)")
             if used { return true }
         } else {
-            log.info("Jump: folder not open in any window; cli skipped")
+            log.info("Jump: cli skipped: multi-root")
         }
         activate(app)
         return false
     }
 
-    /// Plain folder argument focuses the window that already has it open. `-r` would load it into the last active window.
+    /// Plain folder or workspace file argument focuses the window that already has it open. `-r` would load it into the last active window.
     private static func runEditorCLI(terminal: TerminalApp, folder: String) -> Bool {
         guard let args = JumpTarget.cliArgs(folder: folder),
               let bin = JumpTarget.cliCandidates(for: terminal).first(where: FileManager.default.isExecutableFile(atPath:)) else { return false }
