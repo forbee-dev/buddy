@@ -22,7 +22,7 @@ enum Arrangement: String, CaseIterable, Identifiable {
 
 /// UserDefaults-backed settings.
 enum PrefKey {
-    static let mode = "mode", walking = "walking", scale = "scale", sleepMascot = "sleepMascot"
+    static let mode = "mode", walking = "walking", scale = "scale", sleepMascot = "sleepMascot", keepAwake = "keepAwake"
     static let notifyPermission = "notify.permission", notifyQuestion = "notify.question", notifyDone = "notify.done"
     static let notifyActions = "notify.actions"
     static let onboarded = "onboarded", looks = "lookOverrides", hotkey = "hotkey", paletteHotkey = "hotkey.palette"

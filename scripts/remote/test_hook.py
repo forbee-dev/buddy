@@ -284,7 +284,7 @@ class InstallTests(Home):
         self.assertIn(b"RemoteForward", r.stdout)
         first = self.settings()
         self.assertEqual(first["theme"], "dark")
-        self.assertEqual(len(first["hooks"]), 13)
+        self.assertEqual(len(first["hooks"]), 15)
         self.assertEqual(first["hooks"]["StopFailure"][0]["hooks"][0]["timeout"], 5)
         self.assertEqual(first["hooks"]["Stop"][0], user["hooks"]["Stop"][0])
         cmd = first["hooks"]["PermissionRequest"][0]["hooks"][0]
@@ -342,7 +342,7 @@ class InstallTests(Home):
     def test_install_without_settings_file(self):
         r = self.run_script(INSTALL, TOKEN)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(len(self.settings()["hooks"]), 13)
+        self.assertEqual(len(self.settings()["hooks"]), 15)
 
     def test_bad_token_or_json_changes_nothing(self):
         for bad in ("", "short", "AB" * 32, "zz" * 32, "ab" * 32 + "; rm -rf ~"):

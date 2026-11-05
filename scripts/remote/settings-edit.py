@@ -7,7 +7,7 @@ SUFFIX = "/.buddy/bin/buddy-hook-remote"
 SPECS = [("SessionStart", None, 5), ("SessionEnd", None, 5), ("UserPromptSubmit", None, 5), ("Stop", None, 5),
          ("StopFailure", None, 5), ("Notification", None, 5), ("PermissionRequest", None, 3600), ("PreToolUse", "AskUserQuestion|Agent|Task", 5),
          ("PostToolUse", None, 5), ("PostToolUseFailure", None, 5), ("PermissionDenied", None, 5),
-         ("SubagentStart", None, 5), ("SubagentStop", None, 5)]
+         ("SubagentStart", None, 5), ("SubagentStop", None, 5), ("PreCompact", None, 5), ("PostCompact", None, 5)]
 
 
 def quote(p):

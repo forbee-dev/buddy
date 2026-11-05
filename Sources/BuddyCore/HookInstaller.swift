@@ -41,6 +41,8 @@ public enum HookInstaller {
         Spec(event: "PermissionDenied", matcher: nil, timeout: 5),
         Spec(event: "SubagentStart", matcher: nil, timeout: 5),
         Spec(event: "SubagentStop", matcher: nil, timeout: 5),
+        Spec(event: "PreCompact", matcher: nil, timeout: 5),
+        Spec(event: "PostCompact", matcher: nil, timeout: 5),
     ]
 
     public static var eventCount: Int { specs.count }

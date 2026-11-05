@@ -115,6 +115,7 @@ public struct SessionStore: Sendable {
     public static let maxRemoteSessions = 8
     /// Sessions without a claude pid cannot be reaped by pid; they end after this much silence.
     public static let noPidTTL: TimeInterval = 3600
+    public static let compactingNote = "Compacting…"
     public private(set) var sessions: [String: Session] = [:]
     public init() {}
 
@@ -197,6 +198,11 @@ public struct SessionStore: Sendable {
             if let m = p["last_assistant_message"]?.string { s.lastMessage = m }
             s.applyBackgroundTasks(p["background_tasks"], main: true, now: now)
             s.agentCalls = []
+        case "PreCompact":
+            s.note = Self.compactingNote
+        case "PostCompact":
+            // A later note (an answer, an error) outranks the compacting one.
+            if s.note == Self.compactingNote { s.note = nil }
         case "SessionEnd":
             clearPending(&s, &change, note: nil)
             // clear/resume keep the claude process; a SessionStart with a new id follows.

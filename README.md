@@ -166,6 +166,8 @@ Full steps: [docs/INSTALL.md](docs/INSTALL.md). Something does not work: [Troubl
 - **Right-click menu.** Re-roll look, palette, outfit, Move to left/right edge, Jump and Hide.
 - **Modes.** One mascot per session (the default), or a single buddy with a badge and a session picker.
 - **Subagents and shells.** Settings → General can turn off minis and the shell chip. After an update, click **Install hooks** again.
+- **Compacting.** While Claude Code compacts the context, the card and the palette show "Compacting…" under the session.
+- **Keep awake.** Settings → General → **Keep the Mac awake while a session works** stops idle sleep while a visible local session starts or works. Off by default.
 - **Size.** Tiny 1x, Small 1.5x, Medium 2x (default), Large 3x, Huge 4x. Settings has a live preview.
 - **Settings tabs.** General, Size, Notifications, Sounds, Hooks & Extension, SSH, Permissions, Skins, Diagnostics, About. Notifications are set per event type.
 - **Sounds.** Short sounds for permissions, questions, done, errors and more. Settings → Sounds: Buddy's own chiptune set, macOS sounds, or none, per event.

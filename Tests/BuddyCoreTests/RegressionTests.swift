@@ -113,6 +113,51 @@ private func fileHook(_ event: String, id: String = UUID().uuidString, path: Str
         #expect(try HookInstaller.install(settings: out, hookPath: path) == nil)
     }
 
+    @Test func compactingNoteComesAndGoes() {
+        var s = SessionStore()
+        _ = s.apply(hook("UserPromptSubmit"))
+        _ = s.apply(hook("PreCompact", extra: ["trigger": "auto"]))
+        #expect(s.sessions["s1"]?.note == SessionStore.compactingNote && s.sessions["s1"]?.state == .working)
+        _ = s.apply(hook("PostCompact"))
+        #expect(s.sessions["s1"]?.note == nil)
+        _ = s.apply(hook("PreCompact"))
+        _ = s.apply(hook("PermissionRequest", id: "r1", extra: ["tool_name": "Bash"]))
+        _ = s.apply(hook("PostToolUse", extra: ["tool_name": "Bash"]))
+        _ = s.apply(hook("PostCompact"))
+        #expect(s.sessions["s1"]?.note == "Answered in terminal")
+    }
+
+    @Test func compactPayloadKeepsTriggerOnly() throws {
+        let raw = #"{"session_id":"s1","hook_event_name":"PreCompact","trigger":"manual","custom_instructions":"keep secrets"}"#
+        let p = try HookPayload.decode(Data(raw.utf8))
+        #expect(p["trigger"]?.string == "manual" && p["custom_instructions"] == nil)
+    }
+
+    @Test func installerHasCompactEvents() throws {
+        let path = "/Applications/Buddy.app/Contents/MacOS/buddy-hook"
+        let out = try #require(try HookInstaller.install(settings: nil, hookPath: path))
+        let hooks = try #require(try obj(out)["hooks"] as? [String: Any])
+        for event in ["PreCompact", "PostCompact"] {
+            let h = try #require((hooks[event] as? [[String: Any]])?.first?["hooks"] as? [[String: Any]])
+            #expect(h.first?["timeout"] as? Int == 5)
+        }
+        #expect(try HookInstaller.install(settings: out, hookPath: path) == nil)
+    }
+
+    @Test func keepAwakeOnlyForVisibleLocalWork() {
+        func session(_ state: SessionState, hidden: Bool = false, remote: RemoteOrigin? = nil) -> Session {
+            var s = Session(id: "s", mascotKey: "s", cwd: "", mainState: state, env: HookEnv(), hidden: hidden, updated: Date())
+            s.remote = remote
+            return s
+        }
+        #expect(KeepAwake.shouldHold(sessions: [session(.working)], enabled: true))
+        #expect(KeepAwake.shouldHold(sessions: [session(.done), session(.starting)], enabled: true))
+        #expect(!KeepAwake.shouldHold(sessions: [session(.working)], enabled: false))
+        #expect(!KeepAwake.shouldHold(sessions: [session(.working, hidden: true)], enabled: true))
+        #expect(!KeepAwake.shouldHold(sessions: [session(.done), session(.needsPermission), session(.ended)], enabled: true))
+        #expect(!KeepAwake.shouldHold(sessions: [session(.working, remote: RemoteOrigin(host: "box", user: "u", sshPid: 1, claudePid: nil))], enabled: true))
+    }
+
     @Test func perUserInboxFolder() { // 7
         let uid = getuid()
         #expect(InboxClient.validatedSocket("/tmp/cc-socks-\(uid)/42.sock", claudePid: 42) == "/private/tmp/cc-socks-\(uid)/42.sock")

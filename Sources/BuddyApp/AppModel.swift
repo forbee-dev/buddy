@@ -47,6 +47,8 @@ final class AppModel {
     /// All mascot and bubble panels ordered out; menu and notifications keep working.
     var buddiesHidden: Bool { didSet { defaults.set(buddiesHidden, forKey: PrefKey.buddiesHidden); director?.applyHidden() } }
     var sleepMascot: Bool { didSet { defaults.set(sleepMascot, forKey: PrefKey.sleepMascot); changed() } }
+    var keepAwake: Bool { didSet { defaults.set(keepAwake, forKey: PrefKey.keepAwake); changed() } }
+    @ObservationIgnored let sleepAssertion = SleepAssertion()
     var showMinis: Bool { didSet { defaults.set(showMinis, forKey: PrefKey.showMinis); changed() } }
     var showShells: Bool { didSet { defaults.set(showShells, forKey: PrefKey.showShells); changed() } }
     var notifyPermission: Bool { didSet { defaults.set(notifyPermission, forKey: PrefKey.notifyPermission) } }
@@ -153,6 +155,7 @@ final class AppModel {
             ?? (d.object(forKey: PrefKey.scale) != nil ? .migrate(scale: d.integer(forKey: PrefKey.scale)) : .medium)
         buddiesHidden = d.bool(forKey: PrefKey.buddiesHidden)
         sleepMascot = d.bool(PrefKey.sleepMascot, default: true)
+        keepAwake = d.bool(forKey: PrefKey.keepAwake)
         showMinis = d.bool(PrefKey.showMinis, default: true)
         showShells = d.bool(PrefKey.showShells, default: true)
         notifyPermission = d.bool(PrefKey.notifyPermission, default: true)
@@ -519,7 +522,10 @@ final class AppModel {
         director?.cardChanged(sid)
     }
 
-    func changed() { director?.sync() }
+    func changed() {
+        director?.sync()
+        sleepAssertion.set(KeepAwake.shouldHold(sessions: store.sessions.values, enabled: keepAwake))
+    }
 
     // MARK: Reaper (runs only while there are sessions)
 

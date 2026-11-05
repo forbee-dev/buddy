@@ -51,6 +51,8 @@ private struct GeneralTab: View {
             Toggle("Walk around when idle", isOn: $model.walking)
             if model.reduceMotion { Text("Reduce Motion is on: buddies stand still.").font(.caption).foregroundStyle(.secondary) }
             Toggle("Sleeping buddy when no sessions", isOn: $model.sleepMascot)
+            Toggle("Keep the Mac awake while a session works", isOn: $model.keepAwake)
+                .help("Stops idle sleep while a visible local session starts or works. The display can still sleep.")
             Toggle("Show subagents as minis", isOn: $model.showMinis)
             Toggle("Show background shells", isOn: $model.showShells)
             Picker("Character", selection: Binding(get: { model.character == AppModel.mix ? AppModel.mix : model.characters.first ?? "clawd" },

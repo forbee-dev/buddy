@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 ### Added
 - Universal binary: Buddy runs native on Apple silicon and Intel Macs.
 - `StopFailure` hook: a turn that ends with a rate limit or another API error shows the error state and the reason on the card. Click **Install hooks** again after the update.
+- `PreCompact` and `PostCompact` hooks: the card and the palette show "Compacting…" while Claude Code compacts the context. Click **Install hooks** again after the update.
+- Settings → General → **Keep the Mac awake while a session works**: stops idle sleep while a visible local session starts or works. Off by default.
 - A session named with `claude --name` or `/rename` shows that name on the tag, the cards, the menu, the palette and the digest.
 - Next prompts reach Claude Code builds that use the per-user inbox folder (`/tmp/cc-socks-<uid>`).
 - Settings → About links to Releases, Issues and Discussions, and **Check for updates…** opens the releases page in the browser.

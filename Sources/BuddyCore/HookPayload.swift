@@ -5,7 +5,7 @@ import Foundation
 /// `tool_input` keys, two `tool_response` ids, and the ids of `background_tasks`. The prompt never leaves the hook.
 public enum HookPayload {
     static let limits: [String: Int] = ["last_assistant_message": 16_000, "error": 4_000, "agent_id": 100, "agent_type": 100,
-                                         "tool_name": 200, "session_title": 200, "error_details": 4_000]
+                                         "tool_name": 200, "session_title": 200, "error_details": 4_000, "trigger": 20]
     static let inputLimit = 200
     /// Kept `tool_input` keys that tell two calls of the same tool apart (`SessionStore.matches`).
     static let matchKeys = ["command", "file_path", "url"]
@@ -17,7 +17,7 @@ public enum HookPayload {
         enum Key: String, CodingKey, CaseIterable {
             case session_id, hook_event_name, cwd, permission_mode, source, reason, tool_name, tool_use_id,
                  notification_type, last_assistant_message, error, error_details, transcript_path, agent_id, agent_type,
-                 session_title
+                 session_title, trigger
         }
         enum Big: String, CodingKey { case tool_input, permission_suggestions, tool_response, background_tasks, prompt }
         enum InputKey: String, CodingKey { case description, subagent_type, command, task_id, file_path, url, run_in_background }

@@ -18,7 +18,7 @@ Version 1. Source of truth for `buddy-hook`, the Buddy app, and the VS Code/Curs
 
 `buddy-hook` connects first; if Buddy is not running it exits at once, before it reads stdin. Then it checks the listener: the peer uid must be its own, and the peer process (`LOCAL_PEERPID` → `proc_pidpath`) must be the `Buddy` binary in the same folder as `buddy-hook`. On a mismatch, it sends nothing and exits 0.
 
-`payload` holds only the fields the app uses: `session_id`, `hook_event_name`, `cwd`, `permission_mode`, `source`, `reason`, `tool_name`, `tool_use_id`, `notification_type`, `transcript_path`, `last_assistant_message` (max 16,000 chars), `error` and `error_details` (max 4,000 chars each), `session_title` (max 200 chars; only when the user named the session with `--name` or `/rename`), `agent_id` and `agent_type` (max 100 chars each; present only inside a subagent). For `PermissionRequest` it also holds `tool_input` (whole, never trimmed) and `permission_suggestions`.
+`payload` holds only the fields the app uses: `session_id`, `hook_event_name`, `cwd`, `permission_mode`, `source`, `reason`, `tool_name`, `tool_use_id`, `notification_type`, `transcript_path`, `last_assistant_message` (max 16,000 chars), `error` and `error_details` (max 4,000 chars each), `session_title` (max 200 chars; only when the user named the session with `--name` or `/rename`), `trigger` (PreCompact: `manual` or `auto`; `custom_instructions` never), `agent_id` and `agent_type` (max 100 chars each; present only inside a subagent). For `PermissionRequest` it also holds `tool_input` (whole, never trimmed) and `permission_suggestions`.
 
 Other events keep only these parts of the big fields:
 

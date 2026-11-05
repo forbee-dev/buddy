@@ -108,7 +108,7 @@ If Buddy runs from outside an Applications folder, the window first offers **Mov
 - The file is written back with sorted keys, so key order can change.
 - Only new Claude sessions use the hooks.
 
-Events: `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `Stop`, `StopFailure`, `Notification`, `PermissionRequest` (timeout 3600 s, the only one that waits), `PreToolUse` (matcher `AskUserQuestion|Agent|Task`), `PostToolUse`, `PostToolUseFailure`, `PermissionDenied`, `SubagentStart`, `SubagentStop` (timeout 5 s each).
+Events: `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `Stop`, `StopFailure`, `Notification`, `PermissionRequest` (timeout 3600 s, the only one that waits), `PreToolUse` (matcher `AskUserQuestion|Agent|Task`), `PostToolUse`, `PostToolUseFailure`, `PermissionDenied`, `SubagentStart`, `SubagentStop`, `PreCompact`, `PostCompact` (timeout 5 s each).
 
 **After you update Buddy, click Install hooks again.** A new version can use new events (for example `SubagentStart` and `SubagentStop` for subagent minis). When your installed hooks lack them, the menu and Settings show "New hook events available: click Install hooks". Install adds only what is missing; your other hooks stay.
 
@@ -124,6 +124,7 @@ The companion extension lets Buddy type your next prompt into the right editor t
 - Jump needs the companion extension 0.1.2 or Accessibility for exact window focus. With two editor windows open, the extension tells Buddy which folder each window has.
 - Settings → Hooks & Extension shows **Install in VS Code** and **Install in Cursor** for each editor command it finds (`code`, `cursor` in `/usr/local/bin`, `/opt/homebrew/bin`, or inside the app bundles).
 - Buddy runs `<cli> --install-extension <bundled .vsix> --force` only when you click. It shows the result.
+- Once published, the extension is also on [Open VSX](https://open-vsx.org/extension/tiagosantos-local/buddy-companion): open the Extensions view in Cursor or VS Code and search "Buddy Companion". The editor then updates it. The bundled install from the app still works.
 - Without the extension, Buddy sends the next prompt through the session's inbox socket, as a peer message.
 - A next prompt can have more than one line. Extension 0.1.3 or later pastes it as one multi-line prompt. Older versions join the lines with spaces. Install the extension again after you update Buddy.
 
