@@ -23,6 +23,7 @@ Only the latest release gets fixes.
 
 - **Hook → app**: `buddy-hook` checks the listener before it sends. The peer uid must match, and the peer process (`LOCAL_PEERPID`, `proc_pidpath`) must be the `Buddy` binary next to the hook. Release builds ignore `BUDDY_SOCKET`.
 - **App → hook**: the first message decides the role of a connection. A hook connection carries one hook message only. The peer must be the bundled `buddy-hook`, and its parent or grandparent must be the claude pid that the message names.
+- **Status line bridge** (`buddy-hook statusline`, opt-in): the hook forwards only the `rate_limits` object of the status line JSON (never the model, cwd, cost, or transcript path), with the same peer rule as a hook; the user's previous status line command runs unchanged, with the same stdin, from `/bin/sh -c`. The app never logs the numbers, and the diagnostics report leaves them out.
 - **Routing fields** (claude pid, shell pid, tty, inbox socket, token) come from `SessionStart` only. A later `SessionStart` from another claude pid can take over only when the old process is dead.
 - **Inbox socket**: only `/tmp/cc-socks/<claude pid>.sock`. Before each send, Buddy checks with `lstat` that it is a real socket owned by the user, in a folder that others cannot write (or that has the sticky bit).
 - **Extension**: only terminals whose shell runs under the extension's own editor process count.

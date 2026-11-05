@@ -63,6 +63,17 @@ final class UninstallRun {
             } catch {
                 return (false, "\(error)")
             }
+        case .restoreStatusLine:
+            defer { model.refreshHookStatus() }
+            do {
+                switch try HookInstaller.applyStatusLine(install: false, settingsURL: model.settingsURL, hookPath: model.hookPath,
+                                                         previousURL: model.previousStatusLineURL) {
+                case .unchanged: return (true, "No Buddy status line was installed.")
+                case .written(let backup): return (true, "Restored." + AppModel.backupNote(backup))
+                }
+            } catch {
+                return (false, "\(error)")
+            }
         case .removeSettingsBackups(let dir):
             let names = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).filter(UninstallPlan.isSettingsBackup)
             guard !names.isEmpty else { return (true, "None found.") }

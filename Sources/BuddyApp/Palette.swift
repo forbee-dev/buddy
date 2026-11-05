@@ -51,6 +51,7 @@ struct PaletteView: View {
                     .textFieldStyle(.plain).font(.title3)
                     .focused($searchFocus)
                     .accessibilityLabel("Filter sessions")
+                PlanUsageChip(model: model)
             }
             Divider()
             if rows.isEmpty {

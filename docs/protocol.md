@@ -87,6 +87,16 @@ If `wantsReply` is `true`, the app answers on the same connection with exactly o
 
 `buddy-hook` fails open: if the socket is missing, refuses, or any error happens, it exits 0 with no output. It never exits 2.
 
+### Status line bridge (`buddy-hook statusline`)
+
+Settings → General → **Show plan usage** sets `statusLine` in `~/.claude/settings.json` to `{"type":"command","command":"'<hookPath>' statusline"}`. The user's previous `statusLine` object (or `null`) goes to `~/Library/Application Support/Buddy/statusline-previous.json` (0600); turning the setting off, Uninstall hooks, or Uninstall Buddy puts it back. Claude Code runs the command with the status line JSON on stdin after each assistant message. The hook reads stdin (max 256 KB), sends one line with only the `rate_limits` object, and does not wait for an answer (100 ms for the app's close at most). Then it runs the previous command with `/bin/sh -c`, the same stdin bytes, and passes its stdout and exit code through. Without a previous command it prints nothing and exits 0.
+
+```json
+{"kind":"statusline","claudePid":123,"rateLimits":{"five_hour":{"used_percentage":23.5,"resets_at":1738425600},"seven_day":{"used_percentage":41.2,"resets_at":1738857600}}}
+```
+
+The app applies the hook peer rule, parses the windows (0 to 100, a reset time in the future; a bad window is dropped), and sends nothing back. `rate_limits` exists only for claude.ai Pro, Max and Ultra logins in terminal sessions.
+
 ## remote hook → app (`remote.sock`)
 
 Opt-in (Settings → SSH). Setup and trust model: [SSH.md](SSH.md), [SECURITY.md](SECURITY.md).

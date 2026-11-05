@@ -168,7 +168,7 @@ private func fileHook(_ event: String, id: String = UUID().uuidString, path: Str
 
     @Test func uninstallDeletesOnlySettingsBackups() { // 8
         let steps = UninstallPlan.steps(editors: [], home: "/h", appPath: "/a/Buddy.app")
-        #expect(steps[1] == .removeSettingsBackups(dir: "/h/.claude"))
+        #expect(steps[2] == .removeSettingsBackups(dir: "/h/.claude"))
         #expect(UninstallPlan.isSettingsBackup("settings.json.buddy-backup-20261105-120000-000"))
         #expect(!UninstallPlan.isSettingsBackup("settings.json"))
         #expect(!UninstallPlan.isSettingsBackup("settings.local.json.buddy-backup-1"))

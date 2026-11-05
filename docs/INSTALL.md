@@ -185,12 +185,13 @@ Settings → Diagnostics shows a green, orange, or red dot and a fix for each ch
 Menu bar icon → **Uninstall Buddy…**. A window lists the steps. Nothing changes until you click **Uninstall**. Each step then shows its result:
 
 1. Remove Buddy's hooks from `~/.claude/settings.json`. Buddy writes a backup first, as for Uninstall hooks.
-2. Uninstall the companion extension (`tiagosantos-local.buddy-companion`) from VS Code and Cursor with their `--uninstall-extension` command, if it is installed. Reload the editor windows after.
-3. Turn off Start at login.
-4. Remove `~/Library/Application Support/Buddy`.
-5. Delete the SSH token from the login Keychain, if there is one.
-6. Remove the `settings.json.buddy-backup-*` files in `~/.claude`.
-7. **Quit and Show in Finder** quits Buddy and selects Buddy.app in Finder. Drag it to the Trash. Buddy never deletes the app bundle itself.
+2. Restore the previous status line in `~/.claude/settings.json`, when Show plan usage installed Buddy's bridge (the key is removed when you had none).
+3. Uninstall the companion extension (`tiagosantos-local.buddy-companion`) from VS Code and Cursor with their `--uninstall-extension` command, if it is installed. Reload the editor windows after.
+4. Turn off Start at login.
+5. Remove `~/Library/Application Support/Buddy`.
+6. Delete the SSH token from the login Keychain, if there is one.
+7. Remove the `settings.json.buddy-backup-*` files in `~/.claude`.
+8. **Quit and Show in Finder** quits Buddy and selects Buddy.app in Finder. Drag it to the Trash. Buddy never deletes the app bundle itself.
 
 Buddy's settings (`com.tiagosantos.buddy` in UserDefaults) stay. To remove them too: `defaults delete com.tiagosantos.buddy`.
 

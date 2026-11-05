@@ -20,9 +20,10 @@ struct HookBinaryTests {
         "/tmp/buddy-t-\(UUID().uuidString.prefix(8)).sock"
     }
 
-    func run(stdin: String, socket: String, env: [String: String] = [:]) throws -> (Process, Pipe) {
+    func run(stdin: String, socket: String, env: [String: String] = [:], args: [String] = []) throws -> (Process, Pipe) {
         let p = Process()
         p.executableURL = Self.binary
+        p.arguments = args
         p.environment = ["BUDDY_SOCKET": socket, "CLAUDE_PID": "\(getpid())", "HOME": "/nonexistent"].merging(env) { $1 }
         let input = Pipe(), output = Pipe()
         p.standardInput = input
@@ -110,6 +111,62 @@ struct HookBinaryTests {
         let (status, out, _) = try roundTrip { _ in try WireMessage.encode(AckMessage(reqId: "x", ok: true, error: nil)) }
         #expect(status == 0)
         #expect(out.isEmpty)
+    }
+
+    // MARK: statusline mode
+
+    static let limits = #""rate_limits":{"five_hour":{"used_percentage":12,"resets_at":9999999999}}"#
+
+    /// A HOME with a saved previous status line command.
+    func homeWith(previous: String?) throws -> URL {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("buddy-sl-\(UUID().uuidString)")
+        let dir = home.appendingPathComponent("Library/Application Support/Buddy")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        if let previous { try Data(previous.utf8).write(to: dir.appendingPathComponent(HookInstaller.previousStatusLineFile)) }
+        return home
+    }
+
+    @Test func statusLineWithoutAppPrintsNothingFast() throws {
+        let start = Date()
+        let (p, out) = try run(stdin: "{\(Self.limits)}", socket: Self.tempSocketPath(), args: ["statusline"])
+        p.waitUntilExit()
+        #expect(p.terminationStatus == 0)
+        #expect(out.fileHandleForReading.readDataToEndOfFile().isEmpty)
+        #expect(Date().timeIntervalSince(start) < 3)
+    }
+
+    @Test func statusLineSendsOnlyRateLimitsThenRunsThePreviousCommand() throws {
+        let path = Self.tempSocketPath()
+        let server = try UnixSocket.listen(path)
+        defer { close(server); unlink(path) }
+        let home = try homeWith(previous: #"{"type":"command","command":"cat >/dev/null; echo hi"}"#)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let (p, out) = try run(stdin: #"{"session_id":"s","cwd":"/secret","model":{"id":"x"},\#(Self.limits)}"#, socket: path,
+                               env: ["HOME": home.path], args: ["statusline"])
+        let conn = try acceptWithin3s(server)
+        let line = try #require(try UnixSocket.readLine(conn))
+        guard case .statusLine(let m) = try WireMessage.decode(line) else { Issue.record("not statusline"); return }
+        #expect(m.claudePid == getpid())
+        #expect(m.rateLimits["five_hour"]?["used_percentage"] == .number(12))
+        #expect(!String(decoding: line, as: UTF8.self).contains("secret"))
+        close(conn)
+        p.waitUntilExit()
+        #expect(p.terminationStatus == 0)
+        #expect(String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self) == "hi\n")
+    }
+
+    @Test func statusLineWithoutLimitsStaysSilentOnTheSocketAndPassesTheExitCode() throws {
+        let path = Self.tempSocketPath()
+        let server = try UnixSocket.listen(path)
+        defer { close(server); unlink(path) }
+        let home = try homeWith(previous: #"{"type":"command","command":"exit 3"}"#)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let (p, out) = try run(stdin: #"{"session_id":"s","cwd":"/x"}"#, socket: path, env: ["HOME": home.path], args: ["statusline"])
+        p.waitUntilExit()
+        #expect(p.terminationStatus == 3)
+        #expect(out.fileHandleForReading.readDataToEndOfFile().isEmpty)
+        var pfd = pollfd(fd: server, events: Int16(POLLIN), revents: 0)
+        #expect(poll(&pfd, 1, 200) == 0)  // nothing connected
     }
 
     @Test func nonBlockingHookWaitsForAppToClose() throws {

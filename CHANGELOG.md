@@ -6,6 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 ## [Unreleased]
 
 ### Added
+- Settings → General → **Show plan usage**: a "5h 23% · 7d 41%" chip with the claude.ai 5-hour and 7-day limits in the bubble, the tooltip, the menu and the palette, through a status line bridge that keeps your own status line command working, plus one notification when a window passes 90%. Off by default.
 - Universal binary: Buddy runs native on Apple silicon and Intel Macs.
 - `StopFailure` hook: a turn that ends with a rate limit or another API error shows the error state and the reason on the card. Click **Install hooks** again after the update.
 - `PreCompact` and `PostCompact` hooks: the card and the palette show "Compacting…" while Claude Code compacts the context. Click **Install hooks** again after the update.

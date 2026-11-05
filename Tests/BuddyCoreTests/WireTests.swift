@@ -28,6 +28,8 @@ import Testing
         let send = SendMessage(reqId: "r", shellPid: 1, text: "hi", submit: true)
         #expect(try WireMessage.decode(WireMessage.encode(send)) == .send(send))
         #expect(try WireMessage.decode(Data(#"{"kind":"future"}"#.utf8)) == .unknown("future"))
+        let status = StatusLineMessage(claudePid: 7, rateLimits: json(#"{"five_hour":{"used_percentage":1,"resets_at":2}}"#))
+        #expect(try WireMessage.decode(WireMessage.encode(status)) == .statusLine(status))
     }
 
     @Test func badAndOversizeRejected() throws {

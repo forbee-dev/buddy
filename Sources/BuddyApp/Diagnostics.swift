@@ -45,6 +45,12 @@ final class Diagnostics {
                 : missing.count == all ? DiagRow(.bad, "Hooks", "Not installed for this app", fix: install)
                 : DiagRow(.warn, "Hooks", "Missing events: \(missing.joined(separator: ", "))", fix: install))
         }
+        // Never the percentages: the report is meant for a public issue.
+        let bridge = HookInstaller.statusLineStatus(settings: settings, previousSaved: FileManager.default.fileExists(atPath: model.previousStatusLineURL.path))
+        let got = model.planUsage.map { "a value arrived at \($0.updatedAt.formatted(date: .omitted, time: .standard))" } ?? "no value yet"
+        rows.append(!model.showPlanUsage ? DiagRow(.ok, "Plan usage bridge", "off")
+            : bridge == .installed ? DiagRow(.ok, "Plan usage bridge", "installed, \(got)")
+            : DiagRow(.warn, "Plan usage bridge", bridge.label, fix: "Turn Show plan usage off and on in Settings → General."))
         let check = HookBlockers.check([
             .init(name: "~/.claude/settings.json", data: settings, managed: false),
             .init(name: "~/.claude/settings.local.json", data: read(home + "/.claude/settings.local.json"), managed: false),

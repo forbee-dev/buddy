@@ -69,5 +69,39 @@ func run() throws {
     FileHandle.standardOutput.write(Data(reply.output.encoded().utf8))
 }
 
+/// `buddy-hook statusline`: sends only `rate_limits` to the app without waiting for an answer, then runs the
+/// user's own status line command (saved by the app at install) with the same stdin and passes its output through.
+func statusLine() -> Int32 {
+    let input = FileHandle.standardInput.readDataToEndOfFile()
+    struct Slim: Decodable { var rate_limits: JSONValue? }
+    if input.count <= 256 * 1024, let limits = (try? JSONDecoder().decode(Slim.self, from: input))?.rate_limits, limits.object != nil,
+       let fd = try? UnixSocket.connect(UnixSocket.defaultPath(allowOverride: debugBuild)) {
+        if trustedServer(fd), let line = try? WireMessage.encode(StatusLineMessage(claudePid: gatherEnv().claudePid, rateLimits: limits)) {
+            UnixSocket.setSendTimeout(fd, milliseconds: 100)
+            try? UnixSocket.writeAll(fd, line)
+            // The app checks this process while it is alive; 100 ms is enough for its close, never a full wait.
+            shutdown(fd, SHUT_WR)
+            UnixSocket.setReceiveTimeout(fd, milliseconds: 100)
+            UnixSocket.drainUntilClose(fd)
+        }
+        close(fd)
+    }
+    let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+    guard let saved = SafeFile.contents(HookInstaller.previousStatusLineURL(home: home).path, maxBytes: 64 * 1024),
+          let previous = try? JSONDecoder().decode(JSONValue.self, from: saved),
+          previous["type"]?.string == "command", let command = previous["command"]?.string, !command.isEmpty else { return 0 }
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/sh")
+    p.arguments = ["-c", command]
+    let stdin = Pipe()
+    p.standardInput = stdin
+    do { try p.run() } catch { return 0 }
+    try? stdin.fileHandleForWriting.write(contentsOf: input)
+    try? stdin.fileHandleForWriting.close()
+    p.waitUntilExit()
+    return p.terminationStatus
+}
+
+if CommandLine.arguments.dropFirst().first == "statusline" { exit(statusLine()) }
 do { try run() } catch {}
 exit(0)

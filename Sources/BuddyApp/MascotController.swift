@@ -238,9 +238,9 @@ final class MascotController {
         let place = position.map { ", position \($0.n) of \($0.of)" } ?? ""
         let wait = waitText.isEmpty ? "" : ", \(waitText)"
         let state = spec.sleeping ? "sleeping" : spec.state.label
-        let usage = spec.spokenUsage.map { ", \($0)" } ?? ""
+        let usage = (spec.spokenUsage.map { ", \($0)" } ?? "") + (spec.spokenPlan.map { ", \($0)" } ?? "")
         sprite.setAccessibilityLabel("Buddy for \(spec.label), \(state)\(wait)\(count)\(usage)\(place)")
-        sprite.toolTip = ([spec.label, state] + [spec.usage].compactMap { $0 }).joined(separator: " · ")
+        sprite.toolTip = ([spec.label, state] + [spec.usage, spec.plan].compactMap { $0 }).joined(separator: " · ")
     }
 
     /// "waiting 6m · api" while impatient: the timer stays readable when a long name truncates.

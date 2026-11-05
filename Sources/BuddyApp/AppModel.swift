@@ -55,6 +55,21 @@ final class AppModel {
     var notifyQuestion: Bool { didSet { defaults.set(notifyQuestion, forKey: PrefKey.notifyQuestion) } }
     var notifyDone: Bool { didSet { defaults.set(notifyDone, forKey: PrefKey.notifyDone) } }
     var notifyActions: Bool { didSet { defaults.set(notifyActions, forKey: PrefKey.notifyActions) } }
+    var notifyPlanUsage: Bool { didSet { defaults.set(notifyPlanUsage, forKey: PrefKey.notifyPlanUsage) } }
+    /// Settings → General, off by default: installs the status line bridge (`buddy-hook statusline`) when on.
+    var showPlanUsage: Bool {
+        didSet {
+            defaults.set(showPlanUsage, forKey: PrefKey.showPlanUsage)
+            if showPlanUsage != oldValue, !statusLineBusy { installStatusLine(showPlanUsage) }
+        }
+    }
+    /// A failed install turns the toggle off without a second install call.
+    @ObservationIgnored var statusLineBusy = false
+    /// The plan limits from the last status line update; windows drop when their reset time passes.
+    private(set) var planUsage: PlanUsage?
+    var statusLineStatus: HookInstaller.StatusLineStatus = .missing
+    /// Windows (keyed by name and reset time) that already got their one 90% notification.
+    @ObservationIgnored private var planReminded: Set<String> = []
     /// Minutes of waiting before a buddy gets impatient; 0 = off.
     var escalateMinutes: Int { didSet { defaults.set(escalateMinutes, forKey: PrefKey.escalateMinutes) } }
     /// Minutes away before Buddy shows a digest on return; 0 = off.
@@ -162,6 +177,8 @@ final class AppModel {
         notifyQuestion = d.bool(PrefKey.notifyQuestion, default: true)
         notifyDone = d.bool(PrefKey.notifyDone, default: false)
         notifyActions = d.bool(PrefKey.notifyActions, default: true)
+        notifyPlanUsage = d.bool(PrefKey.notifyPlanUsage, default: true)
+        showPlanUsage = d.bool(forKey: PrefKey.showPlanUsage)
         escalateMinutes = Self.nearest(d.int(PrefKey.escalateMinutes, default: 3), in: Self.escalateChoices)
         awayMinutes = Self.nearest(d.int(PrefKey.awayMinutes, default: 5), in: Self.awayChoices)
         funExtras = d.bool(PrefKey.funExtras, default: true)
@@ -411,6 +428,11 @@ final class AppModel {
             }
             conn.role = .hook
             handleHook(h, from: conn)
+        case (.statusLine(let m), .unknown):
+            // Same peer rule as a hook. The bridge never waits, so nothing is sent back.
+            conn.role = .hook
+            if hookPeerAllowed(conn, claudePid: m.claudePid), showPlanUsage { receivePlanUsage(m.rateLimits) }
+            conn.close()
         case (.extHello(let m), .unknown):
             conn.role = .ext
             ext.hello(m, from: conn)
@@ -424,14 +446,34 @@ final class AppModel {
     }
 
     /// The peer must be the bundled buddy-hook, a child (or grandchild) of the claude pid it reports.
-    private func hookPeerAllowed(_ conn: Connection, _ h: HookMessage) -> Bool {
+    private func hookPeerAllowed(_ conn: Connection, _ h: HookMessage) -> Bool { hookPeerAllowed(conn, claudePid: h.env.claudePid) }
+
+    private func hookPeerAllowed(_ conn: Connection, claudePid: Int32?) -> Bool {
         guard let pid = conn.peerPid, let expected = expectedHookPath else { return false }
         // The audit token names the exact process; the pid only when the kernel gave no token.
         let peerPath = conn.peerToken.map(PeerCheck.path(ofToken:)) ?? PeerCheck.path(of: pid)
         return PeerCheck.hookPeerAllowed(peerPath: peerPath, expectedHookPath: expected,
                                          ancestors: Array(ProcInfo.ancestors(of: pid, limit: 3).dropFirst()),
-                                         claudePid: h.env.claudePid)
+                                         claudePid: claudePid)
     }
+
+    // MARK: Plan usage (status line bridge)
+
+    /// Stores the parsed limits and posts the one 90% reminder per window. The numbers are never logged.
+    private func receivePlanUsage(_ limits: JSONValue, now: Date = Date()) {
+        guard let u = PlanUsage.parse(json: limits, now: now) else { return }
+        planUsage = u
+        for r in u.reminders(now: now) where planReminded.insert(r.key).inserted && notifyPlanUsage {
+            notifier?.planUsage(r.text, key: r.key)
+        }
+        planReminded = planReminded.filter { key in u.reminders(now: now).contains { $0.key == key } }
+        startReaper()
+        changed()
+    }
+
+    /// "5h 23% · 7d 41%" while a window is known and the setting is on.
+    var planChip: String? { showPlanUsage ? planUsage?.chip : nil }
+    var planSpoken: String? { showPlanUsage ? planUsage?.spoken() : nil }
 
     private func handleHook(_ msg: HookMessage, from conn: Connection, origin: RemoteOrigin? = nil) {
         let sid = msg.payload["session_id"]?.string
@@ -527,10 +569,10 @@ final class AppModel {
         sleepAssertion.set(KeepAwake.shouldHold(sessions: store.sessions.values, enabled: keepAwake))
     }
 
-    // MARK: Reaper (runs only while there are sessions)
+    // MARK: Reaper (runs only while there are sessions or plan limits)
 
     private func startReaper() {
-        guard reaper == nil, !store.isEmpty else { return }
+        guard reaper == nil, !store.isEmpty || planUsage != nil else { return }
         let t = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.reap() }
         }
@@ -540,7 +582,11 @@ final class AppModel {
     }
 
     private func reap() {
-        guard !store.isEmpty else { reaper?.invalidate(); reaper = nil; return }
+        if var u = planUsage, u.dropExpired() {
+            planUsage = u.isEmpty ? nil : u
+            changed()
+        }
+        guard !store.isEmpty || planUsage != nil else { reaper?.invalidate(); reaper = nil; return }
         escalate(now: Date())
         away.check(model: self)
         // On a copy: an unchanged store is not written, so no view updates every 5 s.

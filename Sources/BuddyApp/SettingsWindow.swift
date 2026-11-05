@@ -87,6 +87,10 @@ private struct GeneralTab: View {
                 Button("Edit prices…") { NSWorkspace.shared.open(URL(fileURLWithPath: model.pricesPath)) }
                     .help("Opens prices.json. Buddy reads it at start.")
             }
+            Toggle("Show plan usage (5-hour and 7-day limits)", isOn: $model.showPlanUsage)
+                .disabled(!model.showPlanUsage && !services.isInApplications)
+                .help("Adds a status line bridge to ~/.claude/settings.json. Your own status line command keeps working. Pro, Max, and Ultra logins only; terminal sessions only.")
+            if model.showPlanUsage, let m = model.installMessage { Text(m).font(.caption).fixedSize(horizontal: false, vertical: true) }
             Toggle("Start Buddy at login", isOn: Binding(get: { services.launchAtLogin }, set: { services.setLaunchAtLogin($0) }))
             Picker("Open newest card", selection: $model.hotkey) {
                 ForEach(HotkeyChoice.allCases) { Text($0.label).tag($0) }
@@ -152,6 +156,8 @@ private struct NotificationsTab: View {
             Toggle("Claude needs permission", isOn: $model.notifyPermission)
             Toggle("Claude asks a question", isOn: $model.notifyQuestion)
             Toggle("Claude finishes", isOn: $model.notifyDone)
+            Toggle("A plan limit reaches 90%", isOn: $model.notifyPlanUsage)
+                .help("Needs Show plan usage in Settings → General. One notification per window, no sound.")
             Toggle("Allow answering from notifications", isOn: $model.notifyActions)
             Text("Adds Deny and Review… to permission alerts, Answer… to questions, and Reply… to finished sessions. Allow is only on the card, where you see the whole request: Review… opens it. Deny and Reply… need an unlocked Mac. Alerts show the tool and the project, never the command.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -235,6 +241,8 @@ struct HooksSection: View {
                 Button("Uninstall hooks") { model.installHooks(false) }
             }
             if let m = model.installMessage { Text(m).font(.caption).fixedSize(horizontal: false, vertical: true) }
+            Text("Plan usage bridge: \(model.statusLineStatus.label)").font(.callout)
+                .help("Settings → General → Show plan usage installs or removes it.")
             Divider()
             Text("VS Code / Cursor extension").font(.headline).accessibilityAddTraits(.isHeader)
             Text("Lets Buddy type your next prompt into the right editor terminal.").font(.callout).foregroundStyle(.secondary)
@@ -253,6 +261,12 @@ struct HooksSection: View {
             if let m = services.message { Text(m).font(.caption).fixedSize(horizontal: false, vertical: true) }
         }
         .onAppear { model.refreshHookStatus() }
+    }
+}
+
+extension HookInstaller.StatusLineStatus {
+    var label: String {
+        switch self { case .installed: "installed"; case .missing: "not installed"; case .replaced: "replaced by another command" }
     }
 }
 

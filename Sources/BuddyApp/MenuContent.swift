@@ -45,7 +45,15 @@ struct MenuContent: View {
 
     @ViewBuilder private var buddies: some View {
         let sessions = model.menuSessions
-        Text("Buddies").font(.headline).accessibilityAddTraits(.isHeader)
+        HStack {
+            Text("Buddies").font(.headline).accessibilityAddTraits(.isHeader)
+            Spacer()
+            PlanUsageChip(model: model)
+        }
+        if model.planChip != nil, let u = model.planUsage {
+            // The windows with their reset times; the chip above carries the color.
+            ForEach(u.lines(), id: \.self) { Text($0).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+        }
         if let err = model.sheetError {
             Label { Text(err) } icon: { Image(systemName: "xmark.octagon.fill").foregroundStyle(.red) }.font(.caption)
         }

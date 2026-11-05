@@ -103,8 +103,10 @@ public enum UnixSocket {
         }
     }
 
-    public static func setSendTimeout(_ fd: Int32, seconds: Int) {
-        var tv = timeval(tv_sec: seconds, tv_usec: 0)
+    public static func setSendTimeout(_ fd: Int32, seconds: Int) { setSendTimeout(fd, milliseconds: seconds * 1000) }
+
+    public static func setSendTimeout(_ fd: Int32, milliseconds ms: Int) {
+        var tv = timeval(tv_sec: ms / 1000, tv_usec: Int32(ms % 1000) * 1000)
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
     }
 

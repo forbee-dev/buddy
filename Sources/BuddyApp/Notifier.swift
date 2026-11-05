@@ -89,6 +89,14 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         return true
     }
 
+    /// "Plan usage: 5-hour limit at 92%. Resets in 1 h 05 min." Once per window and reset; no sound, no session.
+    func planUsage(_ text: String, key: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Plan usage"
+        content.body = text
+        add(UNNotificationRequest(identifier: "buddy-plan-\(key)", content: content, trigger: nil))
+    }
+
     /// A one-line follow-up, e.g. "Already answered".
     func info(_ sid: String, project: String?, _ text: String) {
         let content = UNMutableNotificationContent()

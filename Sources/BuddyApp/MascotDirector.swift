@@ -16,6 +16,9 @@ struct MascotSpec: Equatable {
     var usage: String?
     var spokenUsage: String?
     var tagUsage: String?
+    /// "5h 23% · 7d 41%" and its spoken form, the same for every buddy.
+    var plan: String?
+    var spokenPlan: String?
 }
 
 /// Reconciles mascots with sessions and runs the shared animation loop.
@@ -107,6 +110,8 @@ final class MascotDirector {
         spec.usage = model.usageText(sids)
         spec.spokenUsage = model.usageText(sids, spoken: true)
         spec.tagUsage = model.tagUsage(sids)
+        spec.plan = model.planChip
+        spec.spokenPlan = model.planSpoken
         return spec
     }
 

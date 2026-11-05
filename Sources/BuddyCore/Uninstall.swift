@@ -2,6 +2,8 @@ import Foundation
 
 public enum UninstallStep: Equatable, Sendable {
     case removeHooks
+    /// Puts the user's own `statusLine` back, or removes the key when Buddy added it.
+    case restoreStatusLine
     /// The `settings.json.buddy-backup-*` files next to settings.json: they can hold API keys.
     case removeSettingsBackups(dir: String)
     /// `cli` nil: no `code` or `cursor` command was found.
@@ -16,6 +18,7 @@ public enum UninstallStep: Equatable, Sendable {
     public var title: String {
         switch self {
         case .removeHooks: "Remove Buddy's hooks from ~/.claude/settings.json (with a backup)"
+        case .restoreStatusLine: "Restore the previous status line in ~/.claude/settings.json"
         case .removeSettingsBackups: "Delete Buddy's settings.json backups from ~/.claude (they can hold API keys)"
         case .uninstallExtension(let editor, _): "Uninstall the companion extension from \(editor)"
         case .unregisterLoginItem: "Turn off Start at login"
@@ -35,7 +38,7 @@ public enum UninstallPlan {
     public static func steps(editors: [(name: String, cli: String)], home: String, appPath: String) -> [UninstallStep] {
         let ext = editors.isEmpty ? [UninstallStep.uninstallExtension(editor: "VS Code / Cursor", cli: nil)]
             : editors.map { UninstallStep.uninstallExtension(editor: $0.name, cli: $0.cli) }
-        return [.removeHooks, .removeSettingsBackups(dir: home + "/.claude")] + ext + [.unregisterLoginItem, .removeRemoteToken, .removeSupportFolder(path: supportFolder(home: home)),
+        return [.removeHooks, .restoreStatusLine, .removeSettingsBackups(dir: home + "/.claude")] + ext + [.unregisterLoginItem, .removeRemoteToken, .removeSupportFolder(path: supportFolder(home: home)),
                                       .quitAndReveal(appPath: appPath)]
     }
 

@@ -151,6 +151,68 @@ import Testing
     }
 }
 
+@Suite struct StatusLineInstallerTests {
+    let path = "/Applications/Buddy.app/Contents/MacOS/buddy-hook"
+    let ours = #"{"statusLine":{"type":"command","command":"'/Applications/Buddy.app/Contents/MacOS/buddy-hook' statusline"}}"#
+    let user = #"{"model":"opus","statusLine":{"type":"command","command":"ccusage statusline","padding":0}}"#
+
+    func tempDir() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("buddy-sl-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test func freshInstallSetsTheBridge() throws {
+        let r = try HookInstaller.installStatusLine(settings: nil, hookPath: path)
+        let line = try #require(try obj(r.settings)["statusLine"] as? [String: Any])
+        #expect(line["type"] as? String == "command")
+        #expect(line["command"] as? String == "'\(path)' statusline")
+        #expect(r.previous is NSNull)
+        #expect(HookInstaller.statusLineStatus(settings: r.settings, previousSaved: true) == .installed)
+    }
+
+    @Test func userCommandIsSavedAndRestored() throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("settings.json"), prev = dir.appendingPathComponent("support/statusline-previous.json")
+        try Data(user.utf8).write(to: url)
+        guard case .written(let backup?) = try HookInstaller.applyStatusLine(install: true, settingsURL: url, hookPath: path, previousURL: prev) else {
+            Issue.record("not written"); return
+        }
+        #expect(FileManager.default.fileExists(atPath: backup))
+        #expect(try FileManager.default.attributesOfItem(atPath: prev.path)[.posixPermissions] as? Int == 0o600)
+        #expect(try obj(Data(contentsOf: prev))["command"] as? String == "ccusage statusline")
+        #expect(HookInstaller.statusLineStatus(settingsURL: url, home: "/nowhere") == .installed)
+        // Reinstall changes nothing and keeps the saved command.
+        #expect(try HookInstaller.applyStatusLine(install: true, settingsURL: url, hookPath: path, previousURL: prev) == .unchanged)
+        #expect(try obj(Data(contentsOf: prev))["command"] as? String == "ccusage statusline")
+        guard case .written = try HookInstaller.applyStatusLine(install: false, settingsURL: url, hookPath: path, previousURL: prev) else {
+            Issue.record("not restored"); return
+        }
+        #expect(NSDictionary(dictionary: try obj(Data(contentsOf: url))).isEqual(to: try obj(Data(user.utf8))))
+        #expect(!FileManager.default.fileExists(atPath: prev.path))
+        #expect(try HookInstaller.applyStatusLine(install: false, settingsURL: url, hookPath: path, previousURL: prev) == .unchanged)
+    }
+
+    @Test func removeWithoutASavedCommandDeletesTheKey() throws {
+        let out = try obj(HookInstaller.removeStatusLine(settings: Data(ours.utf8), previous: nil))
+        #expect(out["statusLine"] == nil)
+        #expect(try obj(HookInstaller.removeStatusLine(settings: Data(ours.utf8), previous: NSNull()))["statusLine"] == nil)
+        let prevSaved = try obj(HookInstaller.removeStatusLine(settings: Data(ours.utf8), previous: ["type": "command", "command": "x"]))
+        #expect((prevSaved["statusLine"] as? [String: Any])?["command"] as? String == "x")
+    }
+
+    @Test func removeNeverTouchesAnotherCommand() throws {
+        #expect(try HookInstaller.removeStatusLine(settings: Data(user.utf8), previous: nil) == nil)
+        #expect(try HookInstaller.removeStatusLine(settings: nil, previous: nil) == nil)
+        #expect(HookInstaller.statusLineStatus(settings: Data(user.utf8), previousSaved: false) == .missing)
+        #expect(HookInstaller.statusLineStatus(settings: Data(user.utf8), previousSaved: true) == .replaced)
+        #expect(throws: HookInstallerError.unexpectedShape("statusLine")) {
+            try HookInstaller.installStatusLine(settings: Data(#"{"statusLine":"x"}"#.utf8), hookPath: path)
+        }
+    }
+}
+
 @Suite struct InstallerStatusTests {
     let path = "/Applications/Buddy.app/Contents/MacOS/buddy-hook"
 

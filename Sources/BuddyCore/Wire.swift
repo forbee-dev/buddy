@@ -116,8 +116,17 @@ public struct AckMessage: Codable, Sendable, Equatable {
     public init(reqId: String, ok: Bool, error: String?) { self.reqId = reqId; self.ok = ok; self.error = error }
 }
 
+/// `buddy-hook statusline`: only the `rate_limits` object of the status line JSON, fire-and-forget.
+public struct StatusLineMessage: Codable, Sendable, Equatable {
+    public var kind = "statusline"
+    public var claudePid: Int32?
+    public var rateLimits: JSONValue
+    public init(claudePid: Int32?, rateLimits: JSONValue) { self.claudePid = claudePid; self.rateLimits = rateLimits }
+}
+
 public enum WireMessage: Sendable, Equatable {
     case hook(HookMessage)
+    case statusLine(StatusLineMessage)
     case reply(ReplyMessage)
     case extHello(ExtHelloMessage)
     case extTerminals(ExtTerminalsMessage)
@@ -134,6 +143,7 @@ public enum WireMessage: Sendable, Equatable {
         do {
             switch try d.decode(Kind.self, from: line).kind {
             case "hook": return .hook(try d.decode(HookMessage.self, from: line))
+            case "statusline": return .statusLine(try d.decode(StatusLineMessage.self, from: line))
             case "reply": return .reply(try d.decode(ReplyMessage.self, from: line))
             case "ext-hello": return .extHello(try d.decode(ExtHelloMessage.self, from: line))
             case "ext-terminals": return .extTerminals(try d.decode(ExtTerminalsMessage.self, from: line))

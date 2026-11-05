@@ -52,6 +52,7 @@ To remove it: `ssh devbox 'bash -s' < '/Applications/Buddy.app/Contents/Resource
 | Permission and AskUserQuestion cards | Yes. The answer goes back on the same connection. |
 | Jump | Raises the local terminal that runs `ssh` (for VS Code and Cursor, the terminal of that `ssh` process). |
 | Tokens and cost | No. Buddy cannot read the remote transcript. The row shows "remote". |
+| Plan usage | No. The status line bridge runs only on the Mac, so a remote session sends no limits. |
 | Next prompt | No. The card says "Answer in the terminal". |
 | Look | Chosen per host and folder, so `devbox:api` and your local `api` can look different. |
 

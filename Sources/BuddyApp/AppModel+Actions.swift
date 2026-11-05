@@ -116,6 +116,29 @@ extension AppModel {
         hooksInstalled = status == .current
         hooksOutdated = status == .outdated
         hooksInvalid = status == .invalid
+        statusLineStatus = HookInstaller.statusLineStatus(settingsURL: settingsURL, home: NSHomeDirectory())
+    }
+
+    var previousStatusLineURL: URL { HookInstaller.previousStatusLineURL(home: NSHomeDirectory()) }
+
+    /// Settings → General → Show plan usage. A failed install turns the setting off again.
+    func installStatusLine(_ install: Bool) {
+        statusLineBusy = true
+        defer { statusLineBusy = false; refreshHookStatus() }
+        guard canInstallHooks else { installMessage = "buddy-hook not found. Run Buddy from Buddy.app."; showPlanUsage = false; return }
+        guard !install || AppServices.shared.isInApplications else { installMessage = "Move Buddy to Applications first."; showPlanUsage = false; return }
+        do {
+            switch try HookInstaller.applyStatusLine(install: install, settingsURL: settingsURL, hookPath: hookPath, previousURL: previousStatusLineURL) {
+            case .unchanged: installMessage = install ? "Plan usage bridge already installed." : "No Buddy status line to remove."
+            case .written(let backup):
+                installMessage = (install ? "Plan usage bridge installed." : "Previous status line restored.") + Self.backupNote(backup)
+                    + " New Claude sessions use it."
+            }
+        } catch {
+            installMessage = "\(error)"
+            log.error("Status line install failed: \(String(describing: error), privacy: .public)")
+            if install { showPlanUsage = false }
+        }
     }
 
     /// " Backup: settings.json.buddy-backup-…" after a written settings file, else "".

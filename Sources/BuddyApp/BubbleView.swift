@@ -67,6 +67,7 @@ struct BubbleView: View {
                         if let u = model.usageText(s.id) {
                             Text("· \(u)").font(.caption.monospacedDigit()).accessibilityLabel(model.usageText(s.id, spoken: true) ?? u)
                         }
+                        PlanUsageChip(model: model)
                     }
                     .foregroundStyle(.secondary)
                 }
@@ -236,6 +237,26 @@ struct ActivityList: View {
         if s < 60 { return "\(s)s" }
         if s < 3600 { return String(format: "%dm %02ds", s / 60, s % 60) }
         return String(format: "%dh %02dm", s / 3600, s % 3600 / 60)
+    }
+}
+
+/// "5h 23% · 7d 41%": the plan limits, orange from 80% and red from 95%. Nothing while no window is known.
+struct PlanUsageChip: View {
+    let model: AppModel
+
+    var body: some View {
+        if let chip = model.planChip {
+            Text(chip).font(.caption.monospacedDigit()).foregroundStyle(color)
+                .padding(.horizontal, 6).padding(.vertical, 1)
+                .background(Capsule().fill(Color.primary.opacity(0.07)))
+                .help(model.planSpoken ?? chip)
+                .accessibilityLabel(model.planSpoken ?? chip)
+        }
+    }
+
+    private var color: Color {
+        let p = model.planUsage?.maxPercentage ?? 0
+        return p >= PlanUsage.errorAt ? .red : p >= PlanUsage.warnAt ? .orange : .secondary
     }
 }
 

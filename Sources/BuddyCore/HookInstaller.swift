@@ -221,4 +221,87 @@ public enum HookInstaller {
     public static func isInstalled(settingsURL: URL, hookPath: String) -> Bool {
         status(settingsURL: settingsURL, hookPath: hookPath) == .current
     }
+
+    // MARK: Status line bridge (`buddy-hook statusline`)
+
+    public static let previousStatusLineFile = "statusline-previous.json"
+
+    /// The user's `statusLine` object from before Install, or JSON `null` when there was none.
+    public static func previousStatusLineURL(home: String) -> URL {
+        URL(fileURLWithPath: UninstallPlan.supportFolder(home: home) + "/" + previousStatusLineFile)
+    }
+
+    public static func statusLineCommand(for hookPath: String) -> String { command(for: hookPath) + " statusline" }
+
+    /// Buddy's bridge, for this path or any `.../buddy-hook' statusline` (an older or moved Buddy.app).
+    static func isOurStatusLine(_ value: Any?) -> Bool {
+        ((value as? [String: Any])?["command"] as? String)?.hasSuffix("buddy-hook' statusline") == true
+    }
+
+    public enum StatusLineStatus: Sendable, Equatable { case missing, installed, replaced }
+
+    /// `replaced`: Buddy installed the bridge (the previous file exists) but another command took its place.
+    public static func statusLineStatus(settings: Data?, previousSaved: Bool) -> StatusLineStatus {
+        let value = (try? parse(settings))?["statusLine"]
+        if isOurStatusLine(value) { return .installed }
+        return value != nil && previousSaved ? .replaced : .missing
+    }
+
+    public static func statusLineStatus(settingsURL: URL, home: String) -> StatusLineStatus {
+        statusLineStatus(settings: try? Data(contentsOf: settingsURL.resolvingSymlinksInPath()),
+                         previousSaved: FileManager.default.fileExists(atPath: previousStatusLineURL(home: home).path))
+    }
+
+    /// New file contents (nil when the bridge is already in place) and the user's `statusLine` to save
+    /// (`NSNull` when there was none). Refuses a `statusLine` that is not an object.
+    public static func installStatusLine(settings: Data?, hookPath: String) throws -> (settings: Data?, previous: Any) {
+        var dict = try parse(settings)
+        let old = dict["statusLine"]
+        if isOurStatusLine(old) { return (nil, NSNull()) }
+        guard old == nil || old is [String: Any] else { throw HookInstallerError.unexpectedShape("statusLine") }
+        dict["statusLine"] = ["type": "command", "command": statusLineCommand(for: hookPath)]
+        return (try serialize(dict), old ?? NSNull())
+    }
+
+    /// New file contents, or nil when `statusLine` is not Buddy's. `previous` is the saved object, or nil/NSNull to drop the key.
+    public static func removeStatusLine(settings: Data?, previous: Any?) throws -> Data? {
+        var dict = try parse(settings)
+        guard isOurStatusLine(dict["statusLine"]) else { return nil }
+        dict["statusLine"] = previous as? [String: Any]
+        return try serialize(dict)
+    }
+
+    /// Install saves the user's `statusLine` to `previousURL` (mode 0600) before it writes settings; remove puts it
+    /// back and deletes the file. Same backup rules as `apply`.
+    public static func applyStatusLine(install: Bool, settingsURL: URL, hookPath: String, previousURL: URL, now: Date = Date()) throws -> InstallResult {
+        let url = settingsURL.resolvingSymlinksInPath()
+        let fm = FileManager.default
+        let existing = fm.fileExists(atPath: url.path) ? try Data(contentsOf: url) : nil
+        let new: Data?
+        if install {
+            let r = try installStatusLine(settings: existing, hookPath: hookPath)
+            new = r.settings
+            if new != nil {
+                try fm.createDirectory(at: previousURL.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                       attributes: [.posixPermissions: 0o700])
+                let data = try JSONSerialization.data(withJSONObject: r.previous, options: [.fragmentsAllowed, .sortedKeys])
+                guard fm.createFile(atPath: previousURL.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
+                    throw SocketError(call: "save previous status line", code: EIO)
+                }
+            }
+        } else {
+            let saved = fm.contents(atPath: previousURL.path).flatMap { try? JSONSerialization.jsonObject(with: $0, options: [.fragmentsAllowed]) }
+            new = try removeStatusLine(settings: existing, previous: saved)
+            try? fm.removeItem(at: previousURL)
+        }
+        guard let new else { return .unchanged }
+        var backup: String?
+        if let existing {
+            backup = try writeBackup(existing, settingsPath: url.path, now: now)
+        } else {
+            try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        }
+        try new.write(to: url, options: [.atomic])
+        return .written(backup: backup)
+    }
 }

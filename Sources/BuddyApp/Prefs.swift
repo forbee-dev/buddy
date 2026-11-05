@@ -24,7 +24,7 @@ enum Arrangement: String, CaseIterable, Identifiable {
 enum PrefKey {
     static let mode = "mode", walking = "walking", scale = "scale", sleepMascot = "sleepMascot", keepAwake = "keepAwake"
     static let notifyPermission = "notify.permission", notifyQuestion = "notify.question", notifyDone = "notify.done"
-    static let notifyActions = "notify.actions"
+    static let notifyActions = "notify.actions", notifyPlanUsage = "notify.plan", showPlanUsage = "plan.show"
     static let onboarded = "onboarded", looks = "lookOverrides", hotkey = "hotkey", paletteHotkey = "hotkey.palette"
     static let size = "size", buddiesHidden = "buddiesHidden", arrangement = "arrangement"
     static let showMinis = "minis.show", showShells = "minis.shells"
