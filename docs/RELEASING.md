@@ -16,6 +16,24 @@
 
 CI has a `package` job that runs the build and DMG scripts with an ad hoc signature. It only validates the scripts. The released DMG is built and signed locally.
 
+## Extension on Open VSX
+
+The companion extension is published to [Open VSX](https://open-vsx.org) as `tiagosantos-local.buddy-companion`. Cursor and VS Code users can then install and update it from the Extensions view. The app keeps bundling the `.vsix` as the fallback, so **Install in VS Code / Cursor** works without the registry.
+
+One-time, done by the maintainer (never by an agent):
+
+1. Create an Eclipse account and sign in to open-vsx.org with it. Sign the publisher agreement.
+2. Create an access token in the Open VSX user settings. Keep it out of the repo. Put it in `OVSX_PAT` in your shell only when you publish.
+3. Create the namespace: `cd vscode-ext && npx ovsx create-namespace tiagosantos-local -p "$OVSX_PAT"`.
+
+Per release:
+
+1. Bump `version` in `vscode-ext/package.json`. Open VSX rejects a version that is already published.
+2. `cd vscode-ext && npm ci && npm test && npm run package`.
+3. `OVSX_PAT=<token> npm run publish:ovsx`. It uploads `buddy-companion-<version>.vsix`.
+4. Check the listing at `https://open-vsx.org/extension/tiagosantos-local/buddy-companion`.
+5. Build the app after the bump, so it bundles the same `.vsix`.
+
 ## Local dev install
 
 `scripts/install-local.sh` builds and installs a local build into `/Applications` (see [INSTALL.md](INSTALL.md)). It moves the old app to the Trash. It does not make a DMG and does not notarize.
