@@ -17,4 +17,11 @@ import Testing
         #expect(DoneAutoCard.shouldClose(elapsed: 8, touched: false))
         #expect(!DoneAutoCard.shouldClose(elapsed: 30, touched: true))
     }
+
+    @Test func doneOutlivesIdlePrompt() {
+        var s = SessionStore()
+        _ = s.apply(hook("Stop", session: "d", pid: 1))
+        _ = s.apply(hook("Notification", session: "d", pid: 1, extra: ["notification_type": "idle_prompt"]))
+        #expect(s.sessions["d"]?.state == .done)
+    }
 }

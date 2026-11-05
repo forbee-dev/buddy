@@ -274,7 +274,8 @@ public struct SessionStore: Sendable {
         switch type {
         case "permission_prompt": if s.mainPending == nil { s.state = .needsPermission }
         case "elicitation_dialog", "agent_needs_input": if s.mainPending == nil { s.state = .asking }
-        case "idle_prompt": if s.state == .done || s.state == .starting { s.state = .idle }
+        // Done stays done until the next prompt: idle_prompt (about 60 s later) used to hide the finish.
+        case "idle_prompt": if s.state == .starting { s.state = .idle }
         default: break
         }
     }

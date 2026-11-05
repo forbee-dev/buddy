@@ -5,7 +5,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-05
+
 ### Changed
+- A done buddy stays done until your next prompt. Before, it went idle about 60 s after Claude finished.
 - The done card opens by itself when a session finishes a turn. It takes no keyboard focus. It closes after 8 seconds if you do not touch it.
 - The done sprite plays once and holds its last frame while the session stays done.
 
