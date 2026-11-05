@@ -206,7 +206,7 @@ final class MascotController {
         showBadge()
         updateLabel()
         minis.update(subagents: new.subagents, shells: new.shells,
-                     project: new.sessionId.flatMap { model.session($0)?.projectName } ?? new.label, look: new.look)
+                     project: new.sessionId.flatMap { model.session($0)?.displayName } ?? new.label, look: new.look)
         sprite.setAccessibilityHelp("Press to open the bubble. Use the actions menu for more.")
         updateActions()
         if sessionChanged, let sid = new.sessionId { bubble?.retarget(sid) }
@@ -307,7 +307,7 @@ final class MascotController {
             let wasOpen = bubble != nil
             showBubble(focus: false)
             let who = p.agentId.map { "\(s.subagentLabel($0)) (subagent)" } ?? "Claude"
-            if !wasOpen { Announcer.say("\(s.projectName): \(p.kind == .question ? "\(who) has a question" : "\(who) wants to run \(DisplayText.reveal(p.toolName))")") }
+            if !wasOpen { Announcer.say("\(s.displayName): \(p.kind == .question ? "\(who) has a question" : "\(who) wants to run \(DisplayText.reveal(p.toolName))")") }
         } else if DoneAutoCard.shouldOpen(from: old, to: spec.state, hasPending: false, cardOpen: bubble != nil, hidden: model.buddiesHidden) {
             showBubble(focus: false)
             autoClose()
@@ -380,6 +380,13 @@ final class MascotController {
     }
 
     private func unpin() { pinned = false; y = director.floor.minY; updateActions(); director.motionChanged() }
+
+    /// Display changed: back inside the floor; a pinned or slotted buddy keeps its height.
+    func screenChanged() {
+        let f = director.floor
+        x = min(max(x, f.minX), max(f.minX, f.maxX - panelSize.width))
+        if !pinned, slot == nil { y = f.minY }
+    }
 
     // MARK: Fun extras and the away digest
 

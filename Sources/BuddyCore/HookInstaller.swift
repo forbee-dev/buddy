@@ -29,6 +29,8 @@ public enum HookInstaller {
         Spec(event: "SessionEnd", matcher: nil, timeout: 5),
         Spec(event: "UserPromptSubmit", matcher: nil, timeout: 5),
         Spec(event: "Stop", matcher: nil, timeout: 5),
+        // Runs instead of Stop when the turn ends with an API error.
+        Spec(event: "StopFailure", matcher: nil, timeout: 5),
         Spec(event: "Notification", matcher: nil, timeout: 5),
         // The only blocking hook: it answers permissions and AskUserQuestion.
         Spec(event: "PermissionRequest", matcher: nil, timeout: 3600),

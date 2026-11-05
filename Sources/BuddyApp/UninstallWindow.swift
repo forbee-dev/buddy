@@ -63,6 +63,12 @@ final class UninstallRun {
             } catch {
                 return (false, "\(error)")
             }
+        case .removeSettingsBackups(let dir):
+            let names = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).filter(UninstallPlan.isSettingsBackup)
+            guard !names.isEmpty else { return (true, "None found.") }
+            // unlink removes a symlink itself, never its target.
+            let failed = names.filter { unlink(dir + "/" + $0) != 0 }
+            return failed.isEmpty ? (true, "Deleted \(names.count).") : (false, "\(failed.count) of \(names.count) not deleted.")
         case .uninstallExtension(let editor, let cli):
             guard let cli else { return (true, "Skipped: no code or cursor command found.") }
             let list = await AppServices.run(cli, ["--list-extensions"])

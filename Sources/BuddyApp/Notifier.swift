@@ -72,7 +72,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             return false
         }
         let content = UNMutableNotificationContent()
-        content.title = s.projectName
+        content.title = s.displayName
         content.body = stillWaiting.map { "Still waiting (\($0)m). \(body)" } ?? body
         var info = ["session": s.id]
         if let p = s.pending, s.state != .done { info["request"] = p.id; posted[s.id] = p.id }

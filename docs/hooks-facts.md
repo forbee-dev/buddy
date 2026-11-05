@@ -21,6 +21,7 @@ Per event. TESTED unless noted:
 | SessionStart | `source` (`startup`/`resume`/`clear`/`compact`/`fork`), `model` | `"source":"startup"` |
 | UserPromptSubmit | `prompt` | `"prompt":"Run the bash command: echo hi"` |
 | Stop | `stop_hook_active`, `last_assistant_message`, `background_tasks`, `session_crons` | `"stop_hook_active":false` |
+| StopFailure (DOCS, not tested) | `stop_hook_active`, `last_assistant_message`, `error`, `error_type` (`rate_limit`, `overloaded`, `billing_error`, ...) | runs instead of Stop when the turn ends with an API error |
 | SubagentStop (DOCS) | `stop_hook_active`, `agent_id`, `agent_type`, `agent_transcript_path`, `last_assistant_message` | |
 | Notification (DOCS, plus real payload seen) | `message`, optional `title`, `notification_type` | see below |
 | SessionEnd | `reason` | `"reason":"other"` (seen in `-p`) |
@@ -127,7 +128,7 @@ Verdict: **YES** via the session inbox socket. TESTED.
 
 ### Option A: cross-session messaging inbox socket (recommended)
 Docs: https://code.claude.com/docs/en/cross-session-messaging.md. Needs Claude Code 2.1.224+ (we have 2.1.317). On by default.
-- Claude Code binds a Unix socket per session: `/tmp/cc-socks/<claude_pid>.sock` (TESTED, files exist).
+- Claude Code binds a Unix socket per session: `/tmp/cc-socks/<claude_pid>.sock` (TESTED, files exist). Newer builds use a per-user folder: `/tmp/cc-socks-<uid>/<claude_pid>.sock` (DOCS). Buddy accepts both.
 - Hooks get env `CLAUDE_CODE_MESSAGING_SOCKET` (path), `CLAUDE_CODE_MESSAGING_TOKEN` (per-session secret) and `CLAUDE_PID`. Set before SessionStart runs. TESTED.
 - Protocol: JSON lines. Optional first line `{"type":"auth","token":"<token>"}` (optional on macOS). Then:
 ```json

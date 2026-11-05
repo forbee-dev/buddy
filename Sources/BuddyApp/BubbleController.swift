@@ -154,6 +154,8 @@ final class BubbleController {
         let editor = panel.firstResponder as? NSTextView
         // Return during IME composition confirms the composition, not the card.
         if editor?.hasMarkedText() == true { return false }
+        // Esc must not throw away a typed next prompt: it only leaves the field.
+        if Int(e.keyCode) == kVK_Escape, !selection.prompt.isEmpty { panel.makeFirstResponder(nil); return true }
         if TextFieldKeys.keepInField(keyCode: Int(e.keyCode), command: e.modifierFlags.contains(.command), textFocused: editor != nil) {
             editor?.keyDown(with: e)
             return true
@@ -234,6 +236,7 @@ final class BubbleController {
     }
 
     func close() {
+        selection.onKey = nil  // the card's closure holds the view; break the cycle
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
         if let resizeObserver { NotificationCenter.default.removeObserver(resizeObserver); self.resizeObserver = nil }
         panel.orderOut(nil)

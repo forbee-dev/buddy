@@ -18,13 +18,13 @@ Version 1. Source of truth for `buddy-hook`, the Buddy app, and the VS Code/Curs
 
 `buddy-hook` connects first; if Buddy is not running it exits at once, before it reads stdin. Then it checks the listener: the peer uid must be its own, and the peer process (`LOCAL_PEERPID` → `proc_pidpath`) must be the `Buddy` binary in the same folder as `buddy-hook`. On a mismatch, it sends nothing and exits 0.
 
-`payload` holds only the fields the app uses: `session_id`, `hook_event_name`, `cwd`, `permission_mode`, `source`, `reason`, `tool_name`, `tool_use_id`, `notification_type`, `transcript_path`, `last_assistant_message` (max 16,000 chars), `error` (max 4,000 chars), `agent_id` and `agent_type` (max 100 chars each; present only inside a subagent). For `PermissionRequest` it also holds `tool_input` (whole, never trimmed) and `permission_suggestions`.
+`payload` holds only the fields the app uses: `session_id`, `hook_event_name`, `cwd`, `permission_mode`, `source`, `reason`, `tool_name`, `tool_use_id`, `notification_type`, `transcript_path`, `last_assistant_message` (max 16,000 chars), `error` and `error_details` (max 4,000 chars each), `session_title` (max 200 chars; only when the user named the session with `--name` or `/rename`), `agent_id` and `agent_type` (max 100 chars each; present only inside a subagent). For `PermissionRequest` it also holds `tool_input` (whole, never trimmed) and `permission_suggestions`.
 
 Other events keep only these parts of the big fields:
 
 | Field | Kept | Used for |
 |---|---|---|
-| `tool_input` | `description`, `subagent_type`, `command`, `task_id`, `file_path` (strings, max 200 chars each), `run_in_background` (bool) | subagent label, shell label, TaskStop, tips |
+| `tool_input` | `description`, `subagent_type`, `command`, `task_id`, `file_path`, `url` (strings, max 200 chars each), `run_in_background` (bool) | subagent label, shell label, TaskStop, tips; `command`, `file_path`, and `url` also tell a `PostToolUse` of another call of the same tool from the one a `PermissionRequest` card waits for |
 | `tool_response` | `agentId`, `backgroundTaskId`, `task_type` (strings, max 200 chars) | link a subagent to its Agent call; shell id; TaskStop of a subagent or a shell |
 | `background_tasks` | `id`, `type`, `status` of each entry (max 50 entries) | a shell that left the list has finished |
 | `prompt` | never sent. For a `<task-notification>` prompt the hook sends only its `<task-id>` as `task_id` (ASCII letters, digits, `-`, `_`, max 64 chars) and its `<status>` as `task_status` (ASCII letters and digits, max 20 chars) | a background task ended, and how |
@@ -35,7 +35,7 @@ Everything else in `tool_input`, `tool_response`, and `prompt` (Agent prompts, c
 
 Events: `SubagentStart` and `SubagentStop` (non-blocking), plus `PreToolUse` with the matcher `AskUserQuestion|Agent|Task`. Every event fired inside a subagent carries `agent_id`. The app routes such events to that subagent only; they never change the main session state. The one exception is attention: a subagent's `PermissionRequest` shows the normal card, and the buddy shows "needs permission" until it is answered.
 
-- Subagent: created on `SubagentStart`. Its label is the `description` of the oldest `PreToolUse` `Agent` call in the same session that has no subagent yet (FIFO). `PostToolUse` `Agent` with `tool_response.agentId` fixes a wrong pairing. Failed on `PostToolUseFailure` for its `Agent` call. `last_assistant_message` of `SubagentStop` is trimmed to 300 chars.
+- Subagent: created on `SubagentStart`. Its label is the `description` of the oldest `PreToolUse` `Agent` call in the same session that has no subagent yet (FIFO). `PostToolUse` `Agent` with `tool_response.agentId` fixes a wrong pairing. When that `PostToolUse` comes before the `SubagentStart` (a background agent), the call waits and that `SubagentStart` takes it by `agentId`. Failed on `PostToolUseFailure` for its `Agent` call. `last_assistant_message` of `SubagentStop` is trimmed to 300 chars.
 - Done on `SubagentStop`, except while a shell it started is still running: then it stays running. A `SubagentStop` with an `agent_id` that never started is ignored. A second `SubagentStart` with the same `agent_id` resumes the same row (running again, no duplicate).
 - Stopped (killed): `PostToolUse` `TaskStop` whose `tool_input.task_id` is the `agent_id` and `tool_response.task_type` is `local_agent`, or a `<task-notification>` with `task_status` `killed`. A killed subagent gets no `SubagentStop`. `task_status` `completed` marks it done and `failed` marks it failed, unless it still owns a running shell.
 - Subagent permission: it has no `tool_use_id`, so a later `PostToolUse`, `PostToolUseFailure`, or `PermissionDenied` clears the card only when its `agent_id` and `tool_name` match. Answers bind to the request id, as for the main session.
@@ -65,7 +65,7 @@ Events: `SubagentStart` and `SubagentStop` (non-blocking), plus `PreToolUse` wit
 
 Connection roles: the first message on a connection decides its role. A **hook** connection carries exactly one `hook` message (then only the reply). The app accepts it only when the peer process is the bundled `buddy-hook` and its parent or grandparent is `env.claudePid`. Otherwise the app closes the connection, and the hook exits 0 with no output.
 
-Routing fields (`claudePid`, `shellPid`, `tty`, `messagingSocket`, `messagingToken`, ...) are taken from `SessionStart`, or from the first event of a session the app has not seen. Later events that report a different `claudePid` for the same `session_id` are ignored. `messagingSocket` is used only if it is `/tmp/cc-socks/<claudePid>.sock`.
+Routing fields (`claudePid`, `shellPid`, `tty`, `messagingSocket`, `messagingToken`, ...) are taken from `SessionStart`, or from the first event of a session the app has not seen. Later events that report a different `claudePid` for the same `session_id` are ignored. `messagingSocket` is used only if it is `/tmp/cc-socks/<claudePid>.sock` or `/tmp/cc-socks-<uid>/<claudePid>.sock` (the app's own uid).
 
 Non-blocking events (`wantsReply: false`): after it writes the line, the hook half-closes its side and waits (max 1 s) until the app closes the connection. The app closes it after it has handled the message. So the hook process is still alive when the app checks it.
 

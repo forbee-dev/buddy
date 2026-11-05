@@ -51,7 +51,7 @@ struct BubbleView: View {
         let sessions = model.menuSessions.filter { !$0.hidden }
         if sessions.count > 1 {
             Picker("Session", selection: Binding(get: { selection.sessionId ?? "" }, set: { selection.switchTo($0) })) {
-                ForEach(sessions) { s in Text("\(s.projectName) · \(s.state.label)").tag(s.id) }
+                ForEach(sessions) { s in Text("\(s.displayName) · \(s.state.label)").tag(s.id) }
             }
             .accessibilityLabel("Choose a session")
         }
@@ -60,7 +60,7 @@ struct BubbleView: View {
     private func header(_ s: Session?) -> some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(s?.projectName ?? "Buddy").font(.headline)
+                Text(s?.displayName ?? "Buddy").font(.headline)
                 if let s {
                     HStack(spacing: 4) {
                         Text(subtitle(s)).font(.callout)

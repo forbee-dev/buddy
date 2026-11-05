@@ -284,7 +284,8 @@ class InstallTests(Home):
         self.assertIn(b"RemoteForward", r.stdout)
         first = self.settings()
         self.assertEqual(first["theme"], "dark")
-        self.assertEqual(len(first["hooks"]), 12)
+        self.assertEqual(len(first["hooks"]), 13)
+        self.assertEqual(first["hooks"]["StopFailure"][0]["hooks"][0]["timeout"], 5)
         self.assertEqual(first["hooks"]["Stop"][0], user["hooks"]["Stop"][0])
         cmd = first["hooks"]["PermissionRequest"][0]["hooks"][0]
         self.assertEqual((cmd["command"], cmd["timeout"]), ("'%s/.buddy/bin/buddy-hook-remote'" % self.home, 3600))
@@ -308,6 +309,7 @@ class InstallTests(Home):
         r = self.run_script(UNINSTALL)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.settings(), user)
+        self.assertEqual([x for x in os.listdir(os.path.join(self.home, ".claude")) if ".buddy-backup-" in x], [])
         self.assertFalse(os.path.exists(os.path.join(self.home, ".buddy", "bin", "buddy-hook-remote")))
         self.assertFalse(os.path.exists(os.path.join(self.home, ".config", "buddy", "token")))
 
@@ -340,7 +342,7 @@ class InstallTests(Home):
     def test_install_without_settings_file(self):
         r = self.run_script(INSTALL, TOKEN)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(len(self.settings()["hooks"]), 12)
+        self.assertEqual(len(self.settings()["hooks"]), 13)
 
     def test_bad_token_or_json_changes_nothing(self):
         for bad in ("", "short", "AB" * 32, "zz" * 32, "ab" * 32 + "; rm -rf ~"):

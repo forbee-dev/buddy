@@ -5,7 +5,7 @@ hook = sys.argv[3] if mode == "install" else None
 SUFFIX = "/.buddy/bin/buddy-hook-remote"
 # Same events, matchers, and timeouts as the local installer (Sources/BuddyCore/HookInstaller.swift).
 SPECS = [("SessionStart", None, 5), ("SessionEnd", None, 5), ("UserPromptSubmit", None, 5), ("Stop", None, 5),
-         ("Notification", None, 5), ("PermissionRequest", None, 3600), ("PreToolUse", "AskUserQuestion|Agent|Task", 5),
+         ("StopFailure", None, 5), ("Notification", None, 5), ("PermissionRequest", None, 3600), ("PreToolUse", "AskUserQuestion|Agent|Task", 5),
          ("PostToolUse", None, 5), ("PostToolUseFailure", None, 5), ("PermissionDenied", None, 5),
          ("SubagentStart", None, 5), ("SubagentStop", None, 5)]
 

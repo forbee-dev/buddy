@@ -11,11 +11,12 @@ public enum InboxClient {
         return out
     }
 
-    /// Only `/tmp/cc-socks/<claudePid>.sock` is accepted, as `/private/tmp/...`.
+    /// Only `/tmp/cc-socks/<claudePid>.sock` or the per-user `/tmp/cc-socks-<uid>/<claudePid>.sock` is accepted, as `/private/tmp/...`.
     public static func validatedSocket(_ path: String?, claudePid: Int32?) -> String? {
         guard var p = path, let pid = claudePid else { return nil }
         if p.hasPrefix("/tmp/") { p = "/private" + p }
-        return p == "/private/tmp/cc-socks/\(pid).sock" ? p : nil
+        let dirs = ["/private/tmp/cc-socks", "/private/tmp/cc-socks-\(getuid())"]
+        return dirs.contains { p == "\($0)/\(pid).sock" } ? p : nil
     }
 
     /// The socket and its folder must be real (not symlinks) and owned by this user.

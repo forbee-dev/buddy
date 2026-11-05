@@ -31,6 +31,8 @@ final class Connection {
     func start() {
         let src = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .main)
         src.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.readAvailable() } }
+        let fd = fd
+        src.setCancelHandler { Darwin.close(fd) }  // the source may still read until cancel completes
         source = src
         src.resume()
     }
@@ -64,9 +66,8 @@ final class Connection {
     func close() {
         guard !isClosed else { return }
         isClosed = true
-        source?.cancel()
+        if let source { source.cancel() } else { Darwin.close(fd) }
         source = nil
-        Darwin.close(fd)
         onClose?(self)
     }
 }

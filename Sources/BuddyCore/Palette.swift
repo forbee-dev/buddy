@@ -33,7 +33,7 @@ public enum PaletteOrder {
         let words = query.lowercased().split(whereSeparator: \.isWhitespace)
         guard !words.isEmpty else { return sessions }
         return sessions.filter { s in
-            let hay = "\(s.projectName) \(s.state.label)".lowercased()
+            let hay = "\(s.displayName) \(s.state.label)".lowercased()
             return words.allSatisfy { hay.contains($0) }
         }
     }

@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { LineFramer, handleLine as hl, sanitize, framed, PASTE_END, MAX_LINE_BYTES, MAX_TEXT_BYTES, TerminalLike } from "../src/protocol";
+import { LineFramer, handleLine as hl, sanitize, framed, PASTE_END, MAX_LINE_BYTES, MAX_TEXT_BYTES, TerminalLike, ClaudeCheck } from "../src/protocol";
 
-const yes = async () => true;
+const yes: ClaudeCheck = async () => undefined;
 const handleLine = (l: string, f: (p: number) => TerminalLike | undefined, c = yes) => hl(l, f, c);
 const fake = () => {
   const calls: unknown[][] = [];
@@ -100,16 +100,16 @@ test("ESC inside the text cannot end the paste early", async () => {
   assert.equal(sent.split("\x1b").length, 3); // only the two framing ESCs
 });
 
-test("no claude child acks claude-not-foreground and sends nothing", async () => {
+test("a blocked claude acks the reason and sends nothing", async () => {
   const a = fake();
-  const r = await handleLine('{"kind":"send","reqId":"r","shellPid":1,"text":"x"}', () => a.t, async () => false);
+  const r = await handleLine('{"kind":"send","reqId":"r","shellPid":1,"text":"x"}', () => a.t, async () => "claude-not-foreground");
   assert.deepEqual(r.ack, { kind: "ack", reqId: "r", ok: false, error: "claude-not-foreground" });
   assert.equal(a.calls.length, 0);
 });
 
 test("focus skips the claude check", async () => {
   const a = fake();
-  const r = await handleLine('{"kind":"focus","reqId":"r","shellPid":1}', () => a.t, async () => false);
+  const r = await handleLine('{"kind":"focus","reqId":"r","shellPid":1}', () => a.t, async () => "claude-not-running");
   assert.equal((r.ack as any).ok, true);
 });
 

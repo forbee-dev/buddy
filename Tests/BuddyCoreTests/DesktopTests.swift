@@ -14,6 +14,13 @@ import Testing
         #expect(TerminalApp.claudeDesktop.displayName == "Claude Desktop")
     }
 
+    @Test func termProgramNames() {
+        #expect(TerminalApp.detect(HookEnv(termProgram: "WarpTerminal")) == .other("Warp"))
+        #expect(TerminalApp.detect(HookEnv(termProgram: "ghostty")) == .other("Ghostty"))
+        #expect(TerminalApp.detect(HookEnv(termProgram: "WezTerm")) == .other("WezTerm"))
+        #expect(TerminalApp.detect(HookEnv(termProgram: nil)) == .other("terminal"))
+    }
+
     @Test func entrypointSanitized() throws {
         #expect(HookEnv.sanitizeEntrypoint("Claude-Desktop\n$(rm -rf)") == "claude-desktoprm-rf")
         #expect(HookEnv.sanitizeEntrypoint(String(repeating: "a", count: 99)).count == 32)

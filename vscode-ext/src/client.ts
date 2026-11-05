@@ -11,6 +11,8 @@ export interface ClientOptions {
   onState?: (connected: boolean) => void;
   minDelayMs?: number;
   maxDelayMs?: number;
+  /** Backoff cap while the precheck fails (Buddy not running yet). */
+  maxMissingDelayMs?: number;
   logThrottleMs?: number;
 }
 
@@ -67,7 +69,8 @@ export class BuddyClient {
     const bad = this.o.precheck?.();
     if (bad) {
       this.quietLog("untrusted", `socket untrusted, not connecting: ${bad}`);
-      this.schedule();
+      // Buddy may start any moment: a missing socket never waits the full backoff.
+      this.schedule(Math.min(this.max, this.o.maxMissingDelayMs ?? 5000));
       return;
     }
     const sock = net.createConnection(this.o.socketPath);
@@ -125,8 +128,9 @@ export class BuddyClient {
     });
   }
 
-  private schedule(): void {
+  private schedule(cap = this.max): void {
+    this.delay = Math.min(this.delay, cap);
     this.timer = setTimeout(() => this.connect(), this.delay);
-    this.delay = Math.min(this.delay * 2, this.max);
+    this.delay = Math.min(this.delay * 2, cap);
   }
 }

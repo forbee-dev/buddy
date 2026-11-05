@@ -48,9 +48,11 @@ import uuid
 MAX_IN = 1 << 20
 MAX_LINE = 1 << 20
 KEYS = ("session_id", "hook_event_name", "cwd", "permission_mode", "source", "reason", "tool_name", "tool_use_id",
-        "notification_type", "last_assistant_message", "error", "transcript_path", "agent_id", "agent_type")
-LIMITS = {"last_assistant_message": 16000, "error": 4000, "agent_id": 100, "agent_type": 100, "tool_name": 200}
-INPUT_KEYS = ("description", "subagent_type", "command", "task_id", "file_path")
+        "notification_type", "last_assistant_message", "error", "error_details", "transcript_path", "agent_id", "agent_type",
+        "session_title")
+LIMITS = {"last_assistant_message": 16000, "error": 4000, "error_details": 4000, "agent_id": 100, "agent_type": 100,
+          "tool_name": 200, "session_title": 200}
+INPUT_KEYS = ("description", "subagent_type", "command", "task_id", "file_path", "url")
 RESPONSE_KEYS = ("agentId", "backgroundTaskId", "task_type")
 INPUT_LIMIT = 200
 MAX_TASKS = 50
@@ -256,7 +258,7 @@ hook = sys.argv[3] if mode == "install" else None
 SUFFIX = "/.buddy/bin/buddy-hook-remote"
 # Same events, matchers, and timeouts as the local installer (Sources/BuddyCore/HookInstaller.swift).
 SPECS = [("SessionStart", None, 5), ("SessionEnd", None, 5), ("UserPromptSubmit", None, 5), ("Stop", None, 5),
-         ("Notification", None, 5), ("PermissionRequest", None, 3600), ("PreToolUse", "AskUserQuestion|Agent|Task", 5),
+         ("StopFailure", None, 5), ("Notification", None, 5), ("PermissionRequest", None, 3600), ("PreToolUse", "AskUserQuestion|Agent|Task", 5),
          ("PostToolUse", None, 5), ("PostToolUseFailure", None, 5), ("PermissionDenied", None, 5),
          ("SubagentStart", None, 5), ("SubagentStop", None, 5)]
 

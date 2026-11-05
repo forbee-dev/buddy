@@ -4,7 +4,7 @@ import * as path from "path";
 import { BuddyClient } from "./client";
 import { handleLine, TerminalLike } from "./protocol";
 import { checkSocketTrust } from "./trust";
-import { hasClaudeChild } from "./claude";
+import { claudeBlocked } from "./claude";
 
 const SOCKET_DIR = path.join(os.homedir(), "Library", "Application Support", "Buddy");
 const SOCKET = path.join(SOCKET_DIR, "buddy.sock");
@@ -60,7 +60,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }),
     onLine: async (line) => {
       await refresh();
-      const r = await handleLine(line, (pid) => snapshot.get(pid), hasClaudeChild);
+      const r = await handleLine(line, (pid) => snapshot.get(pid), claudeBlocked);
       if (r.log) log(r.log);
       return r.ack;
     },

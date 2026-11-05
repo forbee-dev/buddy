@@ -102,6 +102,7 @@ import Testing
         let steps = UninstallPlan.steps(editors: [("VS Code", "/usr/local/bin/code"), ("Cursor", "/usr/local/bin/cursor")],
                                         home: "/Users/me", appPath: "/Applications/Buddy.app")
         #expect(steps == [.removeHooks,
+                          .removeSettingsBackups(dir: "/Users/me/.claude"),
                           .uninstallExtension(editor: "VS Code", cli: "/usr/local/bin/code"),
                           .uninstallExtension(editor: "Cursor", cli: "/usr/local/bin/cursor"),
                           .unregisterLoginItem,
@@ -117,8 +118,8 @@ import Testing
 
     @Test func noEditorStillListsTheStep() {
         let steps = UninstallPlan.steps(editors: [], home: "/h", appPath: "/a/Buddy.app")
-        #expect(steps.count == 6)
-        #expect(steps[1] == .uninstallExtension(editor: "VS Code / Cursor", cli: nil))
+        #expect(steps.count == 7)
+        #expect(steps[2] == .uninstallExtension(editor: "VS Code / Cursor", cli: nil))
     }
 
     @Test func extensionListParsing() {

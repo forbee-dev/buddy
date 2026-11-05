@@ -18,7 +18,7 @@ hook = sys.argv[3] if mode == "install" else None
 SUFFIX = "/.buddy/bin/buddy-hook-remote"
 # Same events, matchers, and timeouts as the local installer (Sources/BuddyCore/HookInstaller.swift).
 SPECS = [("SessionStart", None, 5), ("SessionEnd", None, 5), ("UserPromptSubmit", None, 5), ("Stop", None, 5),
-         ("Notification", None, 5), ("PermissionRequest", None, 3600), ("PreToolUse", "AskUserQuestion|Agent|Task", 5),
+         ("StopFailure", None, 5), ("Notification", None, 5), ("PermissionRequest", None, 3600), ("PreToolUse", "AskUserQuestion|Agent|Task", 5),
          ("PostToolUse", None, 5), ("PostToolUseFailure", None, 5), ("PermissionDenied", None, 5),
          ("SubagentStart", None, 5), ("SubagentStop", None, 5)]
 
@@ -117,6 +117,9 @@ else:
 BUDDY_PY_EOF
   fi
 fi
+# Buddy's settings backups can hold API keys. Plain files with that exact name only; find never follows symlinks here.
+find "$HOME/.claude/" -maxdepth 1 -type f -name 'settings.json.buddy-backup-*' -delete 2>/dev/null || true
+echo "Deleted Buddy's settings.json backups in ~/.claude (they can hold API keys)."
 rm -f "$HOME/.buddy/bin/buddy-hook-remote" "$HOME/.config/buddy/token"
 rmdir "$HOME/.buddy/bin" "$HOME/.config/buddy" 2>/dev/null || true
 echo "Buddy's remote hook is removed from $(uname -n)."

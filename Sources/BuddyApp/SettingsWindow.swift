@@ -60,13 +60,11 @@ private struct GeneralTab: View {
             }
             .help("The buddy character. Mix gives each session one of all enabled characters. Turn on skins in Settings → Skins.")
             Picker("Get impatient after", selection: $model.escalateMinutes) {
-                Text("Off").tag(0)
-                ForEach([1, 3, 5, 10], id: \.self) { Text("\($0) min").tag($0) }
+                ForEach(AppModel.escalateChoices, id: \.self) { Text($0 == 0 ? "Off" : "\($0) min").tag($0) }
             }
             .help("A buddy that waits on you longer hops and shows a timer. At twice the time it grows and sends one reminder.")
             Picker("While you were away", selection: $model.awayMinutes) {
-                Text("Off").tag(0)
-                ForEach([5, 10, 30], id: \.self) { Text("\($0) min").tag($0) }
+                ForEach(AppModel.awayChoices, id: \.self) { Text($0 == 0 ? "Off" : "\($0) min").tag($0) }
             }
             .help("After this much time away, one buddy tells you what happened.")
             Toggle("Fun extras", isOn: $model.funExtras)
@@ -231,7 +229,7 @@ struct HooksSection: View {
                 WarningText(text: "~/.claude/settings.json is not valid JSON or has an unexpected shape. Buddy does not change it: fix the file first.")
             }
             HStack {
-                Button("Install hooks") { model.installHooks(true) }.disabled(model.hooksInstalled)
+                Button("Install hooks") { model.installHooks(true) }.disabled(model.hooksInstalled || !services.isInApplications)
                 Button("Uninstall hooks") { model.installHooks(false) }
             }
             if let m = model.installMessage { Text(m).font(.caption).fixedSize(horizontal: false, vertical: true) }
@@ -310,12 +308,22 @@ private struct SkinsTab: View {
 
 private struct AboutTab: View {
     let model: AppModel
+    static let repo = URL(string: "https://github.com/forbee-dev/buddy")!
 
     var body: some View {
         VStack(spacing: 8) {
             Text("Buddy").font(.title.bold())
             Text("Version \(AppServices.version)").textSelection(.enabled)
             Text("One mascot per Claude Code session.").foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                ForEach(["Releases", "Issues", "Discussions"], id: \.self) { page in
+                    Link(page, destination: Self.repo.appendingPathComponent(page.lowercased()))
+                }
+            }
+            .font(.callout)
+            // No network calls from the app: the browser shows what is new.
+            Button("Check for updates…") { NSWorkspace.shared.open(Self.repo.appendingPathComponent("releases")) }
+                .controlSize(.small)
             // The row stays after "Hide Bee again", so the button keeps keyboard focus.
             if model.beeUnlocked || model.beeHidden {
                 VStack(spacing: 4) {

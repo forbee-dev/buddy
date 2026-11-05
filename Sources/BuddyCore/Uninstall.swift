@@ -2,6 +2,8 @@ import Foundation
 
 public enum UninstallStep: Equatable, Sendable {
     case removeHooks
+    /// The `settings.json.buddy-backup-*` files next to settings.json: they can hold API keys.
+    case removeSettingsBackups(dir: String)
     /// `cli` nil: no `code` or `cursor` command was found.
     case uninstallExtension(editor: String, cli: String?)
     case unregisterLoginItem
@@ -14,6 +16,7 @@ public enum UninstallStep: Equatable, Sendable {
     public var title: String {
         switch self {
         case .removeHooks: "Remove Buddy's hooks from ~/.claude/settings.json (with a backup)"
+        case .removeSettingsBackups: "Delete Buddy's settings.json backups from ~/.claude (they can hold API keys)"
         case .uninstallExtension(let editor, _): "Uninstall the companion extension from \(editor)"
         case .unregisterLoginItem: "Turn off Start at login"
         case .removeRemoteToken: "Delete the SSH token (\"Buddy SSH token\") from the login Keychain"
@@ -32,9 +35,12 @@ public enum UninstallPlan {
     public static func steps(editors: [(name: String, cli: String)], home: String, appPath: String) -> [UninstallStep] {
         let ext = editors.isEmpty ? [UninstallStep.uninstallExtension(editor: "VS Code / Cursor", cli: nil)]
             : editors.map { UninstallStep.uninstallExtension(editor: $0.name, cli: $0.cli) }
-        return [.removeHooks] + ext + [.unregisterLoginItem, .removeRemoteToken, .removeSupportFolder(path: supportFolder(home: home)),
+        return [.removeHooks, .removeSettingsBackups(dir: home + "/.claude")] + ext + [.unregisterLoginItem, .removeRemoteToken, .removeSupportFolder(path: supportFolder(home: home)),
                                       .quitAndReveal(appPath: appPath)]
     }
+
+    /// A backup file name as `HookInstaller.writeBackup` makes it.
+    public static func isSettingsBackup(_ name: String) -> Bool { name.hasPrefix("settings.json.buddy-backup-") }
 
     /// True when `<cli> --list-extensions` output names the companion (ids are case-insensitive).
     public static func listsExtension(_ output: String) -> Bool {

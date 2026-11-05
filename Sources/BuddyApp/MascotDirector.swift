@@ -64,6 +64,14 @@ final class MascotDirector {
                 }
             })
         }
+        // A display change moves the floor and may change the backing scale.
+        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                for c in self.controllers.values { c.screenChanged() }
+                self.rebuild()
+            }
+        })
     }
 
     func specs() -> [MascotSpec] {
@@ -77,7 +85,7 @@ final class MascotDirector {
             // Single mode keeps the project look; per-session uniqueness is for several buddies.
             guard let look = model.projectLook(cwd: top.lookKey) else { return [] }
             let badge = visible.filter { $0.state.needsAttention || $0.state == .done }.count
-            let label = visible.count == 1 ? top.projectName : "\(visible.count) sessions"
+            let label = visible.count == 1 ? top.displayName : "\(visible.count) sessions"
             // The tag and tooltip count every visible session, not only the one shown.
             return [withActivity(MascotSpec(key: "single", sessionId: top.id, state: top.state, look: look, label: label, badge: badge, sleeping: false),
                                  top, usageOf: visible.map(\.id))]
@@ -85,7 +93,7 @@ final class MascotDirector {
         return visible.compactMap { s in
             model.look(for: s).map {
                 withActivity(MascotSpec(key: s.mascotKey, sessionId: s.id, state: s.state, look: $0,
-                                        label: s.terminal == .claudeDesktop ? "\(s.projectName) · Claude Desktop" : s.projectName,
+                                        label: s.terminal == .claudeDesktop ? "\(s.displayName) · Claude Desktop" : s.displayName,
                                         badge: s.state == .done ? 1 : 0, sleeping: false), s, usageOf: [s.id])
             }
         }
@@ -400,6 +408,7 @@ final class MascotDirector {
             MainActor.assumeIsolated { self?.tick() }
         }
         t.tolerance = next * TickPolicy.tolerance
+        RunLoop.main.add(t, forMode: .common)  // buddies keep walking while a menu is open
         timer = t
     }
 

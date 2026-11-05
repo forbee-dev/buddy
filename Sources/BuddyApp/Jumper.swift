@@ -6,14 +6,17 @@ import BuddyCore
 @MainActor
 enum Jumper {
     static let windowNote = "Jump could not find the window. Grant Accessibility for exact window focus."
+    static let appNote = "Could not find the terminal app. Sessions inside tmux or screen cannot be raised."
 
     /// Returns a note for the bubble when the right window could not be raised. AppleScript and AX calls run off main.
     @discardableResult
     static func jump(to s: Session, ext: ExtensionHub, ticket: JumpTicket, current: @MainActor () -> Int) async -> String? {
         func fresh() -> Bool { ticket.isCurrent(jumpGenerationNow: current()) }
+        // Under tmux or screen the ancestor chain ends at the server, so the bundle id from the hook env is the fallback.
         let app = s.terminal == .claudeDesktop
             ? NSRunningApplication.runningApplications(withBundleIdentifier: TerminalApp.desktopBundleId).first
             : s.env.claudePid.flatMap(terminalApp(above:))
+                ?? s.env.bundleId.flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0).first }
         if app == nil { log.info("Jump: no GUI app found above the claude process") }
         switch s.terminal {
         case .vscode, .cursor:
@@ -32,12 +35,12 @@ enum Jumper {
             activate(app)
             if let tty = s.env.tty { await runScript(terminalScript(tty: tty), fresh: fresh) }
         case .other:
+            guard let app else { return appNote }
             activate(app)
-            if let pid = app?.processIdentifier {
-                let name = s.projectName
-                guard fresh() else { return nil }
-                _ = await Task.detached { raiseWindow(pid: pid, titleContains: name) }.value
-            }
+            let pid = app.processIdentifier, name = s.projectName
+            guard fresh() else { return nil }
+            let raised = await Task.detached { raiseWindow(pid: pid, titleContains: name) }.value
+            return raised ? nil : windowNote
         case .claudeDesktop: activate(app)  // no per-session link: Desktop comes forward, the user picks the session
         }
         return nil

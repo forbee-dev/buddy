@@ -68,7 +68,7 @@ struct BuddyRow: View {
                     thumbnail
                     VStack(alignment: .leading, spacing: 1) {
                         HStack(spacing: 4) {
-                            Text(session.projectName).fontWeight(.medium).lineLimit(1)
+                            Text(session.displayName).fontWeight(.medium).lineLimit(1)
                             Spacer(minLength: 4)
                             if let u = model.usageText(session.id) { Text(u).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
                         }
@@ -85,7 +85,7 @@ struct BuddyRow: View {
                 }
                 .contentShape(Rectangle())
             }
-            .accessibilityLabel("\(session.projectName), \(session.state.label), \(session.terminal.displayName)\(activity)"
+            .accessibilityLabel("\(session.displayName), \(session.state.label), \(session.terminal.displayName)\(activity)"
                                 + (model.usageText(session.id, spoken: true).map { ", \($0)" } ?? ""))
             .accessibilityHint("Opens this buddy's bubble")
             Menu {
@@ -101,7 +101,7 @@ struct BuddyRow: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .accessibilityLabel("Actions for \(session.projectName)")
+            .accessibilityLabel("Actions for \(session.displayName)")
         }
     }
 

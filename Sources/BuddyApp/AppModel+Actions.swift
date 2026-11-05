@@ -123,6 +123,8 @@ extension AppModel {
 
     func installHooks(_ install: Bool) {
         guard canInstallHooks else { installMessage = "buddy-hook not found. Run Buddy from Buddy.app."; return }
+        // A translocated, mounted-image, or Downloads path dies with the next launch; uninstall stays allowed.
+        guard !install || AppServices.shared.isInApplications else { installMessage = "Move Buddy to Applications first."; return }
         do {
             switch try HookInstaller.apply(install: install, settingsURL: settingsURL, hookPath: hookPath) {
             case .unchanged: installMessage = install ? "Hooks already installed." : "No Buddy hooks to remove."

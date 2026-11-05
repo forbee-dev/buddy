@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 import UserNotifications
 
-enum PermissionState: String { case granted = "Granted", denied = "Denied", unknown = "Not asked" }
+enum PermissionState: String { case granted = "Granted", denied = "Denied", unknown = "Not asked", notGranted = "Not granted" }
 
 /// Notifications, Accessibility, Automation status and requests.
 @MainActor
@@ -14,8 +14,11 @@ final class Permissions {
     var automation: PermissionState = .unknown
     var notificationError: String?
 
+    /// macOS shows the Accessibility prompt once per app; after that the user must open System Settings.
+    private static let axAskedKey = "permissions.axAsked"
+
     func refresh() async {
-        accessibility = AXIsProcessTrusted() ? .granted : .unknown
+        accessibility = AXIsProcessTrusted() ? .granted : UserDefaults.standard.bool(forKey: Self.axAskedKey) ? .notGranted : .unknown
         if Notifier.available {
             let s = await UNUserNotificationCenter.current().notificationSettings()
             switch s.authorizationStatus {
@@ -50,8 +53,14 @@ final class Permissions {
     }
 
     func requestAccessibility() {
+        if accessibility == .notGranted,
+           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        UserDefaults.standard.set(true, forKey: Self.axAskedKey)
         // String literal: the kAXTrustedCheckOptionPrompt global is not concurrency-safe in Swift 6.
-        _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
+        accessibility = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary) ? .granted : .notGranted
     }
 
     /// Asks for Apple Events to System Events, so macOS shows the Automation prompt.

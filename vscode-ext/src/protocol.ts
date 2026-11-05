@@ -7,7 +7,8 @@ export interface TerminalLike {
 }
 
 export type Finder = (shellPid: number) => TerminalLike | undefined;
-export type ClaudeCheck = (shellPid: number) => Promise<boolean>;
+/** Resolves to the ack error when typing is unsafe, undefined when claude waits in the foreground. */
+export type ClaudeCheck = (shellPid: number) => Promise<string | undefined>;
 
 /** Keeps tab and newline (CR and CRLF become LF). Drops other C0, DEL, and C1 controls, so no ESC can end the paste early. */
 export const sanitize = (t: string): string => t.replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
@@ -62,7 +63,7 @@ export class LineFramer {
 
 const ackErr = (reqId: string, error: string) => ({ kind: "ack", reqId, ok: false, error });
 
-export async function handleLine(line: string, find: Finder, hasClaude: ClaudeCheck): Promise<Handled> {
+export async function handleLine(line: string, find: Finder, claudeBlocked: ClaudeCheck): Promise<Handled> {
   let msg: unknown;
   try {
     msg = JSON.parse(line);
@@ -95,9 +96,8 @@ export async function handleLine(line: string, find: Finder, hasClaude: ClaudeCh
     }
     const term = find(pid);
     if (!term) return { ack: ackErr(reqId, "no-terminal"), log: `send reqId=${reqId} shellPid=${pid}: no-terminal` };
-    if (!(await hasClaude(pid))) {
-      return { ack: ackErr(reqId, "claude-not-foreground"), log: `send reqId=${reqId} shellPid=${pid}: claude-not-foreground` };
-    }
+    const why = await claudeBlocked(pid);
+    if (why) return { ack: ackErr(reqId, why), log: `send reqId=${reqId} shellPid=${pid}: ${why}` };
     const clean = sanitize(text);
     term.sendText(framed(clean), false);
     // Enter goes separately, after the paste has ended.

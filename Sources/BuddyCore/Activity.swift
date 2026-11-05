@@ -6,6 +6,8 @@ public struct AgentCall: Sendable, Equatable {
     /// The call's `description`, revealed and trimmed. nil: the subagent shows its type.
     public var label: String?
     public var background: Bool
+    /// Set when its PostToolUse came before the SubagentStart (a background agent).
+    public var agentId: String? = nil
 }
 
 public struct Subagent: Sendable, Equatable, Identifiable {
@@ -97,7 +99,15 @@ extension Session {
             agentCalls.append(AgentCall(toolUseId: useId, label: label, background: input?["run_in_background"]?.bool == true))
             if agentCalls.count > Activity.maxCalls { agentCalls.removeFirst() }
         case ("PostToolUse", let t) where Activity.isAgentTool(t):
-            if let aid = p["tool_response"]?["agentId"]?.string { relink(agentId: aid, toolUseId: useId) }
+            if let aid = p["tool_response"]?["agentId"]?.string {
+                if subagents[aid] != nil {
+                    relink(agentId: aid, toolUseId: useId)
+                } else if let i = agentCalls.firstIndex(where: { $0.toolUseId != nil && $0.toolUseId == useId }) {
+                    // A background agent can start after its call returns: the call waits for that SubagentStart.
+                    agentCalls[i].agentId = aid
+                    break
+                }
+            }
             agentCalls.removeAll { $0.toolUseId != nil && $0.toolUseId == useId }
         case ("PostToolUseFailure", let t) where Activity.isAgentTool(t):
             if let id = subagents.values.first(where: { $0.call?.toolUseId != nil && $0.call?.toolUseId == useId })?.id {

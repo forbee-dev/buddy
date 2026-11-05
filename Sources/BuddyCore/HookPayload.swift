@@ -5,8 +5,10 @@ import Foundation
 /// `tool_input` keys, two `tool_response` ids, and the ids of `background_tasks`. The prompt never leaves the hook.
 public enum HookPayload {
     static let limits: [String: Int] = ["last_assistant_message": 16_000, "error": 4_000, "agent_id": 100, "agent_type": 100,
-                                         "tool_name": 200]
+                                         "tool_name": 200, "session_title": 200, "error_details": 4_000]
     static let inputLimit = 200
+    /// Kept `tool_input` keys that tell two calls of the same tool apart (`SessionStore.matches`).
+    static let matchKeys = ["command", "file_path", "url"]
     static let maxTasks = 50
 
     private struct Slim: Decodable {
@@ -14,10 +16,11 @@ public enum HookPayload {
 
         enum Key: String, CodingKey, CaseIterable {
             case session_id, hook_event_name, cwd, permission_mode, source, reason, tool_name, tool_use_id,
-                 notification_type, last_assistant_message, error, transcript_path, agent_id, agent_type
+                 notification_type, last_assistant_message, error, error_details, transcript_path, agent_id, agent_type,
+                 session_title
         }
         enum Big: String, CodingKey { case tool_input, permission_suggestions, tool_response, background_tasks, prompt }
-        enum InputKey: String, CodingKey { case description, subagent_type, command, task_id, file_path, run_in_background }
+        enum InputKey: String, CodingKey { case description, subagent_type, command, task_id, file_path, url, run_in_background }
         enum ResponseKey: String, CodingKey, CaseIterable { case agentId, backgroundTaskId, task_type }
 
         init(from decoder: Decoder) throws {
@@ -33,7 +36,7 @@ public enum HookPayload {
                 return
             }
             if let input = try? big.nestedContainer(keyedBy: InputKey.self, forKey: .tool_input) {
-                var o = HookPayload.strings(input, [.description, .subagent_type, .command, .task_id, .file_path])
+                var o = HookPayload.strings(input, [.description, .subagent_type, .command, .task_id, .file_path, .url])
                 if let bg = try? input.decodeIfPresent(Bool.self, forKey: .run_in_background) {
                     o["run_in_background"] = .bool(bg)
                 }

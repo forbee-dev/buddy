@@ -80,6 +80,10 @@ public struct Session: Sendable, Identifiable {
         return name.isEmpty ? "claude" : RemoteInfo.display(name)
     }
     public var projectName: String { remote.map { "\($0.host):\(folderName)" } ?? folderName }
+    /// `session_title` from `--name` or `/rename`; absent for an unnamed session.
+    public var title: String?
+    /// The session's label in the UI: its name when the user gave one, else the project.
+    public var displayName: String { title ?? projectName }
     /// Set for a session that runs on another host over SSH.
     public var remote: RemoteOrigin?
     /// Look assignment key: the cwd, plus the host for a remote session.
@@ -135,12 +139,13 @@ public struct SessionStore: Sendable {
             if let cwd = p["cwd"]?.string { s.cwd = cwd }
             if let mode = p["permission_mode"]?.string { s.permissionMode = mode }
             if let t = p["transcript_path"]?.string { s.transcriptPath = t }
+            if let t = p["session_title"]?.string { s.title = t }
         }
         if event == "SessionStart" { s.env = Self.routingEnv(msg.env) }
-        s.updated = now
         s.trackTools(event: event, p, now: now)
         if let agent { subagentEvent(&s, agent: agent, event: event, msg: msg, change: &change, now: now) }
         else { transition(&s, event: event, msg: msg, change: &change, now: now) }
+        s.updated = now
         s.pruneActivity(now: now)
         sessions[sid] = s
         return change
@@ -159,7 +164,8 @@ public struct SessionStore: Sendable {
         let tool = p["tool_name"]?.string
         switch event {
         case "SessionStart":
-            s.state = .starting
+            // A compact keeps the same turn going.
+            if p["source"]?.string != "compact" { s.state = .starting }
         case "UserPromptSubmit":
             if s.mainPending != nil { clearPending(&s, &change, note: nil) }
             s.state = .working; s.lastError = nil
@@ -181,11 +187,13 @@ public struct SessionStore: Sendable {
             if s.mainPending == nil { s.state = event == "PostToolUse" ? .working : .error }
             if event == "PostToolUseFailure" { s.lastError = p["error"]?.string }
         case "Notification":
-            applyNotification(&s, type: p["notification_type"]?.string)
-        case "Stop":
+            applyNotification(&s, type: p["notification_type"]?.string, now: now)
+        case "Stop", "StopFailure":
             if s.mainPending != nil { clearPending(&s, &change, note: nil) }
-            s.state = .done
+            // StopFailure replaces Stop when the turn ends with an API error (rate limit, overloaded, billing).
+            s.state = event == "Stop" ? .done : .error
             s.finishedAt = now
+            if event == "StopFailure" { s.lastError = p["error_details"]?.string ?? p["error"]?.string ?? "API error"; s.note = "API error" }
             if let m = p["last_assistant_message"]?.string { s.lastMessage = m }
             s.applyBackgroundTasks(p["background_tasks"], main: true, now: now)
             s.agentCalls = []
@@ -214,7 +222,9 @@ public struct SessionStore: Sendable {
                 s.subagents[agent] = a
                 break
             }
-            let call = s.agentCalls.isEmpty ? nil : s.agentCalls.removeFirst()
+            // A call already linked to this id (its PostToolUse came first) wins over FIFO.
+            let i = s.agentCalls.firstIndex { $0.agentId == agent } ?? s.agentCalls.firstIndex { $0.agentId == nil }
+            let call = i.map { s.agentCalls.remove(at: $0) }
             s.subagents[agent] = Subagent(id: agent, type: Activity.clip(p["agent_type"]?.string ?? "", 40), call: call, startedAt: now)
         case "SubagentStop":
             // Internal agents stop with ids that never started (Q1, E1).
@@ -243,7 +253,12 @@ public struct SessionStore: Sendable {
     private func matches(_ pending: PendingRequest?, _ p: JSONValue) -> Bool {
         guard let pending, pending.agentId == p["agent_id"]?.string else { return false }
         if let a = pending.toolUseId, let b = p["tool_use_id"]?.string { return a == b }
-        return pending.toolName == p["tool_name"]?.string
+        guard pending.toolName == p["tool_name"]?.string else { return false }
+        // PermissionRequest has no tool_use_id: a kept input key tells two calls of the same tool apart.
+        return !HookPayload.matchKeys.contains { key in
+            guard let a = pending.toolInput[key]?.string, let b = p["tool_input"]?[key]?.string else { return false }
+            return HookPayload.trim(a, HookPayload.inputLimit) != b
+        }
     }
 
     private func newSession(_ sid: String, _ msg: HookMessage, origin: RemoteOrigin?, now: Date) -> Session {
@@ -270,9 +285,10 @@ public struct SessionStore: Sendable {
                        agentId: msg.payload["agent_id"]?.string, arrivedAt: now)
     }
 
-    private func applyNotification(_ s: inout Session, type: String?) {
+    private func applyNotification(_ s: inout Session, type: String?, now: Date) {
         switch type {
-        case "permission_prompt": if s.mainPending == nil { s.state = .needsPermission }
+        // It fires about 6 s after the dialog: an event since then means the terminal already answered.
+        case "permission_prompt": if s.pending == nil, now.timeIntervalSince(s.updated) >= 10 { s.state = .needsPermission }
         case "elicitation_dialog", "agent_needs_input": if s.mainPending == nil { s.state = .asking }
         // Done stays done until the next prompt: idle_prompt (about 60 s later) used to hide the finish.
         case "idle_prompt": if s.state == .starting { s.state = .idle }
@@ -283,6 +299,8 @@ public struct SessionStore: Sendable {
     private mutating func rekey(to sid: String, env: HookEnv, origin: RemoteOrigin?, change: inout StoreChange) {
         var probe = Session(id: sid, mascotKey: sid, cwd: "", mainState: .starting, env: env, hidden: false, updated: Date())
         probe.remote = origin
+        // An ended record under this id is history: a resume must not revive it next to the live session.
+        if sessions[sid]?.state == .ended { sessions[sid] = nil }
         guard sessions[sid] == nil, let key = probe.processKey,
               let old = sessions.values.first(where: { $0.processKey == key && $0.state != .ended }) else { return }
         var moved = old

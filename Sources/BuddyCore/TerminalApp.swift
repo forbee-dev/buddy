@@ -23,6 +23,8 @@ public enum TerminalApp: Sendable, Equatable {
         case "iTerm.app": return .iterm
         case "Apple_Terminal": return .terminal
         case "vscode": return .vscode
+        case "WarpTerminal": return .other("Warp")
+        case "ghostty": return .other("Ghostty")
         case let other?: return .other(other)
         case nil: return .other("terminal")
         }

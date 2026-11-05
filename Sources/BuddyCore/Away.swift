@@ -30,10 +30,10 @@ public enum AwayDigest {
         var lines: [DigestLine] = []
         for s in shown {
             if let w = s.waitingSince, w >= since {
-                lines.append(DigestLine(kind: .waiting, text: "\(s.projectName) waiting \(mins(now.timeIntervalSince(w)))",
+                lines.append(DigestLine(kind: .waiting, text: "\(s.displayName) waiting \(mins(now.timeIntervalSince(w)))",
                                         sessionId: s.id, at: w))
             } else if s.state == .done, let f = s.finishedAt, f >= since {
-                lines.append(DigestLine(kind: .finished, text: "\(s.projectName) finished \(ago(now.timeIntervalSince(f)))",
+                lines.append(DigestLine(kind: .finished, text: "\(s.displayName) finished \(ago(now.timeIntervalSince(f)))",
                                         sessionId: s.id, at: f))
             }
         }

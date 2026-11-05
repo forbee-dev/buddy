@@ -73,7 +73,7 @@ extension SessionState {
 public enum SessionOrder {
     public static func menu(_ sessions: [Session]) -> [Session] {
         sessions.sorted {
-            ($0.state.menuRank, $0.projectName.lowercased(), $0.id) < ($1.state.menuRank, $1.projectName.lowercased(), $1.id)
+            ($0.state.menuRank, $0.displayName.lowercased(), $0.id) < ($1.state.menuRank, $1.displayName.lowercased(), $1.id)
         }
     }
 }

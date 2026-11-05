@@ -106,7 +106,7 @@ struct PaletteView: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(s.projectName).fontWeight(.semibold).lineLimit(1)
+                    Text(s.displayName).fontWeight(.semibold).lineLimit(1)
                     Circle().fill(s.state.color).frame(width: 7, height: 7).accessibilityHidden(true)
                     Text(s.state.label).font(.callout).foregroundStyle(.secondary)
                 }
@@ -141,7 +141,7 @@ struct PaletteView: View {
     }
 
     private func label(_ s: Session, summary: String?, now: Date) -> String {
-        [s.projectName, s.state.label, Self.age(s, now: now), summary, model.usageText(s.id, spoken: true)].compactMap { $0 }.joined(separator: ", ")
+        [s.displayName, s.state.label, Self.age(s, now: now), summary, model.usageText(s.id, spoken: true)].compactMap { $0 }.joined(separator: ", ")
     }
 }
 

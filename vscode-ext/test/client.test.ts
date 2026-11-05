@@ -146,6 +146,30 @@ test("precheck failure never connects", async () => {
   }
 });
 
+test("precheck failures retry at the missing cap, not the full backoff", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bp-"));
+  const times: number[] = [];
+  const client = new BuddyClient({
+    socketPath: path.join(dir, "b.sock"),
+    minDelayMs: 40,
+    maxDelayMs: 3000,
+    maxMissingDelayMs: 50,
+    logThrottleMs: 0,
+    log: () => {},
+    precheck: () => (times.push(Date.now()), "missing"),
+    hello: async () => ({ kind: "ext-hello" }),
+    onLine: () => undefined,
+  });
+  try {
+    client.start();
+    await new Promise((r) => setTimeout(r, 400));
+    assert.ok(times.length >= 6, `only ${times.length} attempts: the delay grew past the cap`);
+  } finally {
+    client.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("lines are handled in order even when an earlier one is slow", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bo-"));
   const sock = path.join(dir, "b.sock");

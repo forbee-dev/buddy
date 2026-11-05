@@ -57,6 +57,9 @@ final class AppModel {
     var escalateMinutes: Int { didSet { defaults.set(escalateMinutes, forKey: PrefKey.escalateMinutes) } }
     /// Minutes away before Buddy shows a digest on return; 0 = off.
     var awayMinutes: Int { didSet { defaults.set(awayMinutes, forKey: PrefKey.awayMinutes) } }
+    static let escalateChoices = [0, 1, 3, 5, 10], awayChoices = [0, 5, 10, 30]
+    /// A stale pref snaps to a picker value, so the Picker never shows blank.
+    static func nearest(_ v: Int, in choices: [Int]) -> Int { choices.min { abs($0 - v) < abs($1 - v) } ?? v }
     var funExtras: Bool { didSet { defaults.set(funExtras, forKey: PrefKey.funExtras) } }
     /// The hidden Bee skin was found (BeeEgg). Locked again from Settings → About.
     var beeUnlocked: Bool { didSet { defaults.set(beeUnlocked, forKey: PrefKey.beeUnlocked); SkinStore.shared.reload() } }
@@ -156,8 +159,8 @@ final class AppModel {
         notifyQuestion = d.bool(PrefKey.notifyQuestion, default: true)
         notifyDone = d.bool(PrefKey.notifyDone, default: false)
         notifyActions = d.bool(PrefKey.notifyActions, default: true)
-        escalateMinutes = d.int(PrefKey.escalateMinutes, default: 3)
-        awayMinutes = d.int(PrefKey.awayMinutes, default: 5)
+        escalateMinutes = Self.nearest(d.int(PrefKey.escalateMinutes, default: 3), in: Self.escalateChoices)
+        awayMinutes = Self.nearest(d.int(PrefKey.awayMinutes, default: 5), in: Self.awayChoices)
         funExtras = d.bool(PrefKey.funExtras, default: true)
         showUsage = d.bool(PrefKey.showUsage, default: true)
         costOnTag = d.bool(forKey: PrefKey.costOnTag)
@@ -266,6 +269,16 @@ final class AppModel {
             lockFD = try UnixSocket.acquireLock(dir)
         } catch {
             log.error("Another Buddy is running or the socket folder is unsafe: \(String(describing: error), privacy: .public)")
+            let me = ProcessInfo.processInfo.processIdentifier
+            if let other = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+                .first(where: { $0.processIdentifier != me }) {
+                other.activate()
+            } else {
+                let alert = NSAlert()
+                alert.messageText = "Buddy is already running."
+                alert.informativeText = "\(error)"
+                alert.runModal()
+            }
             NSApp.terminate(nil)
             return
         }
@@ -512,10 +525,12 @@ final class AppModel {
 
     private func startReaper() {
         guard reaper == nil, !store.isEmpty else { return }
-        reaper = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+        let t = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.reap() }
         }
-        reaper?.tolerance = 1
+        t.tolerance = 1
+        RunLoop.main.add(t, forMode: .common)  // keeps running while a menu is open
+        reaper = t
     }
 
     private func reap() {
@@ -597,10 +612,10 @@ final class AppModel {
             answer(sid, requestId: requestId ?? "", output: output)
         case .sendPrompt(let prompt):
             Task {
-                if await sendPrompt(prompt, to: sid) == .failed { notifier?.info(sid, project: session(sid)?.projectName, sendStatus[sid] ?? "Not sent.") }
+                if await sendPrompt(prompt, to: sid) == .failed { notifier?.info(sid, project: session(sid)?.displayName, sendStatus[sid] ?? "Not sent.") }
             }
         case .alreadyAnswered:
-            notifier?.info(sid, project: session(sid)?.projectName, "Already answered. Buddy sent nothing.")
+            notifier?.info(sid, project: session(sid)?.displayName, "Already answered. Buddy sent nothing.")
         }
     }
 
