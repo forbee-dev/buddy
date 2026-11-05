@@ -30,7 +30,7 @@ Users run `brew trust forbee-dev/tap`, then `brew install --cask forbee-dev/tap/
    ```
 
    It writes the `version` and `sha256` into `packaging/homebrew/buddy.rb`.
-4. Copy the cask to the tap and push (step 3 above).
+4. Copy the cask to the tap and push (step 3 above). Or run `TAP_DIR=../homebrew-tap ./scripts/update-cask.sh <version>` in step 3: it copies the cask and prints the commit and audit commands.
 5. Test:
 
    ```sh
@@ -42,5 +42,5 @@ Users run `brew trust forbee-dev/tap`, then `brew install --cask forbee-dev/tap/
 
 ## Notes
 
-- Buddy is not notarized. The cask `caveats` tell users to click Open Anyway in System Settings → Privacy & Security.
-- `zap` removes `~/Library/Application Support/Buddy` and the preferences plist. It never touches `~/.claude`. Hooks in `~/.claude/settings.json` stay: tell users to click Uninstall hooks (or Menu → Uninstall Buddy…) in Buddy first.
+- Buddy is signed with a self-signed certificate, not notarized. The cask `caveats` tell users to click Open Anyway in System Settings → Privacy & Security.
+- `zap` removes `~/Library/Application Support/Buddy` and the preferences plist. It never touches `~/.claude`. Hooks in `~/.claude/settings.json` stay: tell users to click Uninstall hooks (or Menu → Uninstall Buddy…) in Buddy first. `zap` cannot remove the SSH token from the Keychain either; Menu → Uninstall Buddy… has a step for it.

@@ -9,7 +9,9 @@ APP="$ROOT/build/Buddy.app"
 VERSION="$(tr -d '[:space:]' < VERSION)"
 DMG="$ROOT/build/Buddy-$VERSION.dmg"
 
-STAGE="$(mktemp -d)/Buddy"
+TMPD="$(mktemp -d)"
+trap 'rm -rf "$TMPD"' EXIT
+STAGE="$TMPD/Buddy"
 mkdir -p "$STAGE"
 ditto "$APP" "$STAGE/Buddy.app"
 ln -s /Applications "$STAGE/Applications"
@@ -18,6 +20,6 @@ rm -f "$DMG"
 hdiutil create -volname "Buddy $VERSION" -srcfolder "$STAGE" -fs HFS+ -format UDZO -imagekey zlib-level=9 -ov "$DMG" >/dev/null
 
 source "$ROOT/scripts/sign-identity.sh"
-codesign --force ${TIMESTAMP_FLAG[@]+"${TIMESTAMP_FLAG[@]}"} --sign "$SIGN_ID" "$DMG"
+codesign --force ${TIMESTAMP_FLAG[@]+"${TIMESTAMP_FLAG[@]}"} --identifier com.tiagosantos.buddy.dmg --sign "$SIGN_ID" "$DMG"
 codesign --verify "$DMG"
 echo "DMG: $DMG ($(du -h "$DMG" | cut -f1), signed: $SIGN_KIND)"

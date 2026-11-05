@@ -5,7 +5,7 @@
 Buddy tracks Claude Code sessions in terminals (iTerm2, Terminal, others), in IDE terminals (VS Code, Cursor), and in Claude Desktop local Code sessions.
 It does not track cloud or VM sessions, or plain Claude chats.
 
-Needs macOS 14 or later and Claude Code 2.1.224 or later. Tested on Claude Code 2.1.317 and Claude Desktop 4.4212.0 (Claude Code 2.1.309).
+Needs macOS 14 or later, on Apple silicon or Intel, and Claude Code 2.1.224 or later. Tested on Claude Code 2.1.317 and Claude Desktop 4.4212.0 (Claude Code 2.1.309).
 
 ## Homebrew
 
@@ -14,7 +14,7 @@ brew trust forbee-dev/tap
 brew install --cask forbee-dev/tap/buddy
 ```
 
-Homebrew loads no third-party tap until you trust it. Buddy is not notarized yet. On first open, go to System Settings → Privacy & Security → **Open Anyway**.
+Homebrew loads no third-party tap until you trust it. Buddy is signed with a self-signed certificate, not notarized. On first open, go to System Settings → Privacy & Security → **Open Anyway**.
 
 ## Team install (from the DMG)
 
@@ -26,7 +26,15 @@ Homebrew loads no third-party tap until you trust it. Buddy is not notarized yet
 4. Click **Install hooks**.
 5. If you use VS Code or Cursor, click **Install in VS Code** or **Install in Cursor**. Then reload the editor window.
 
-Each ad-hoc or self-signed update is a new app identity for macOS. macOS may ask for Accessibility again after an update. Remove the old Buddy entry in System Settings → Privacy & Security → Accessibility and allow the new one.
+Release builds share one self-signed identity, so macOS keeps the Accessibility permission across updates. Only an ad hoc rebuild (a source build without the `Buddy Dev` certificate) is a new identity. Then remove the old Buddy entry in System Settings → Privacy & Security → Accessibility and allow the new one.
+
+### Verify the download
+
+Compare the hash with the one in the release notes:
+
+```sh
+shasum -a 256 Buddy-<version>.dmg
+```
 
 ## Build from source
 
@@ -38,9 +46,9 @@ You need only the Swift Command Line Tools. Xcode is not necessary.
 open build/Buddy.app
 ```
 
-- The script runs `swift build -c release` and assembles `build/Buddy.app`.
+- The script runs `swift build -c release --arch arm64 --arch x86_64` (a universal binary) and assembles `build/Buddy.app`.
 - `Contents/MacOS`: `Buddy` and `buddy-hook`.
-- `Contents/Resources`: `sprites.json` (from `design/`), `prices.json`, `skins/` (the bundled skins), `sounds/*.wav`, the `remote/` scripts, `AppIcon.icns`, and the newest `vscode-ext/buddy-companion-*.vsix` if there is one.
+- `Contents/Resources`: `sprites.json` (from `design/`), `prices.json`, `skins/` (the bundled skins), `sounds/*.wav`, the `remote/` scripts, `AppIcon.icns`, and `vscode-ext/buddy-companion-<version>.vsix` (the version in `vscode-ext/package.json`). The script builds the `.vsix` when it is missing and `npm` exists. Set `BUDDY_ALLOW_NO_VSIX=1` to build without it.
 - `scripts/make-icon.swift` makes `Resources/AppIcon.icns` from the sprites when `design/sprites.json` changes.
 
 ### Local dev install
@@ -100,7 +108,7 @@ If Buddy runs from outside an Applications folder, the window first offers **Mov
 - The file is written back with sorted keys, so key order can change.
 - Only new Claude sessions use the hooks.
 
-Events: `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `Stop`, `Notification`, `PermissionRequest` (timeout 3600 s, the only one that waits), `PreToolUse` (matcher `AskUserQuestion|Agent|Task`), `PostToolUse`, `PostToolUseFailure`, `PermissionDenied`, `SubagentStart`, `SubagentStop` (timeout 5 s each).
+Events: `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `Stop`, `StopFailure`, `Notification`, `PermissionRequest` (timeout 3600 s, the only one that waits), `PreToolUse` (matcher `AskUserQuestion|Agent|Task`), `PostToolUse`, `PostToolUseFailure`, `PermissionDenied`, `SubagentStart`, `SubagentStop` (timeout 5 s each).
 
 **After you update Buddy, click Install hooks again.** A new version can use new events (for example `SubagentStart` and `SubagentStop` for subagent minis). When your installed hooks lack them, the menu and Settings show "New hook events available: click Install hooks". Install adds only what is missing; your other hooks stay.
 
@@ -179,6 +187,17 @@ Menu bar icon → **Uninstall Buddy…**. A window lists the steps. Nothing chan
 2. Uninstall the companion extension (`tiagosantos-local.buddy-companion`) from VS Code and Cursor with their `--uninstall-extension` command, if it is installed. Reload the editor windows after.
 3. Turn off Start at login.
 4. Remove `~/Library/Application Support/Buddy`.
-5. **Quit and Show in Finder** quits Buddy and selects Buddy.app in Finder. Drag it to the Trash. Buddy never deletes the app bundle itself.
+5. Delete the SSH token from the login Keychain, if there is one.
+6. Remove the `settings.json.buddy-backup-*` files in `~/.claude`.
+7. **Quit and Show in Finder** quits Buddy and selects Buddy.app in Finder. Drag it to the Trash. Buddy never deletes the app bundle itself.
 
 Buddy's settings (`com.tiagosantos.buddy` in UserDefaults) stay. To remove them too: `defaults delete com.tiagosantos.buddy`.
+
+## Troubleshooting
+
+| Problem | What to do |
+|---|---|
+| Hooks do not fire | Only new Claude sessions use the hooks: start a new session. Check `disableAllHooks` and `allowManagedHooksOnly` in `~/.claude/settings.json`. Open Settings → Diagnostics. |
+| "Open Anyway" is not shown | Open System Settings → Privacy & Security and scroll down. Or right-click Buddy.app → Open. |
+| Accessibility is reset after an update | Only ad hoc builds do this. Open System Settings → Privacy & Security → Accessibility, remove Buddy, and add it again. |
+| The extension does not connect | Reload the editor window. Run **Buddy: Show Log** in the editor. Settings → Hooks & Extension lists the connected clients. |

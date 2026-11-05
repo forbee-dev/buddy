@@ -4,13 +4,17 @@
 2. Run `./scripts/build-app.sh`. It builds `build/Buddy.app`.
    - `CFBundleShortVersionString` comes from `VERSION`.
    - `CFBundleVersion` is the build time (`YYYYMMDDhhmm`).
-3. Run `./scripts/make-dmg.sh`. It builds `build/Buddy-<version>.dmg`: Buddy.app plus an Applications link, UDZO compressed, signed with the same identity.
+3. Run `./scripts/make-dmg.sh`. It builds `build/Buddy-<version>.dmg`: Buddy.app plus an Applications link, UDZO compressed, signed with the same identity. The DMG layout is bare on purpose: no background image, no icon positions.
 4. Check the DMG: `hdiutil attach -nobrowse build/Buddy-<version>.dmg`, look at the contents, then `hdiutil detach`.
 5. Move the `[Unreleased]` entries in `CHANGELOG.md` under a new `[<version>]` heading with the date.
 6. Commit, then tag: `git tag v<version> && git push origin main v<version>`.
-7. Make the GitHub release for `v<version>` and attach the DMG: `gh release create v<version> build/Buddy-<version>.dmg`.
-8. Update the Homebrew cask: follow "Update for each release" in [HOMEBREW.md](HOMEBREW.md).
-9. Share the DMG. Users follow [INSTALL.md](INSTALL.md) ("Team install").
+7. Hash the DMG: `shasum -a 256 build/Buddy-<version>.dmg`. Put the hash in the release body, so users can verify the download.
+8. Make the GitHub release and attach the DMG: `gh release create v<version> build/Buddy-<version>.dmg --notes "sha256: <hash>"` (or `--notes-file` with the changelog entry and the hash).
+9. Update the Homebrew cask: `TAP_DIR=<path to homebrew-tap> ./scripts/update-cask.sh <version>`, then commit and push the tap. Details: [HOMEBREW.md](HOMEBREW.md).
+10. Run `brew audit --cask forbee-dev/tap/buddy`. It must pass.
+11. Share the DMG. Users follow [INSTALL.md](INSTALL.md) ("Team install").
+
+CI has a `package` job that runs the build and DMG scripts with an ad hoc signature. It only validates the scripts. The released DMG is built and signed locally.
 
 ## Local dev install
 

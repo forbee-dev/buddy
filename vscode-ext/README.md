@@ -11,8 +11,8 @@ Companion extension for the Buddy macOS app. It connects to `~/Library/Applicati
 
 ## Install
 
-    code --install-extension vscode-ext/buddy-companion-0.1.3.vsix
-    cursor --install-extension vscode-ext/buddy-companion-0.1.3.vsix
+    code --install-extension vscode-ext/buddy-companion-<version>.vsix
+    cursor --install-extension vscode-ext/buddy-companion-<version>.vsix
 
 ## Commands
 

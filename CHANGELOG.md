@@ -5,6 +5,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 
 ## [Unreleased]
 
+### Added
+- Universal binary: Buddy runs native on Apple silicon and Intel Macs.
+- `StopFailure` hook: a turn that ends with a rate limit or another API error shows the error state and the reason on the card. Click **Install hooks** again after the update.
+- A session named with `claude --name` or `/rename` shows that name on the tag, the cards, the menu, the palette and the digest.
+- Next prompts reach Claude Code builds that use the per-user inbox folder (`/tmp/cc-socks-<uid>`).
+- Settings → About links to Releases, Issues and Discussions, and **Check for updates…** opens the releases page in the browser.
+- Jump shows a message when the session runs inside tmux or screen and the terminal cannot be raised.
+- Homebrew cask: `livecheck` finds new releases; the caveat explains the self-signed signature.
+- Docs: a troubleshooting table in INSTALL.md, how to verify the DMG hash, the signing facts, and a Limits section in the README.
+
+### Changed
+- Warp and Ghostty show by name in the menu and the cards.
+- Settings → Hooks & Extension: **Install hooks** is disabled until Buddy runs from Applications. A translocated or Downloads path dies with the next launch.
+- A second copy of Buddy brings the running one to the front, or shows an alert, instead of exiting without a word.
+- Settings → Permissions: Accessibility shows "Not granted" after the first prompt, and **Request** opens the Accessibility pane.
+- Companion extension: reconnects within 5 s while Buddy is not running yet, and refuses to type when `claude` is not the foreground process of the shell.
+- Build: `build-app.sh` fails when the companion extension is not built. CI has a `package` job that runs the build and DMG scripts.
+- Uninstall Buddy… also deletes the `settings.json.buddy-backup-*` files in `~/.claude`. The remote uninstall does the same.
+
+### Fixed
+- A compact (`/compact`, auto-compact) keeps the session state. Before, the buddy jumped back to "starting".
+- A second call of the same tool no longer closes the open permission card. The card waits for its own call.
+- A resume onto an ended session id leaves one buddy, not a live one next to an idle one.
+- A late permission notification after the terminal already answered no longer sets the buddy to "needs permission".
+- Subagents that start after their Agent call returned get the right label.
+- The buddies stay inside the screen when a display connects, disconnects or changes resolution.
+- Esc leaves the next-prompt field and keeps the typed text. Before, it closed the card and dropped it.
+- Buddies keep walking and sessions keep reaping while a menu is open.
+- Settings → General: a stale "impatient" or "away" value snaps to a picker choice, so the picker is never blank.
+- The hook socket is closed only after its read source is cancelled, and a closed card frees its view.
+
+### Security
+- Settings backups that can hold API keys are removed on uninstall (app and remote).
+- The DMG carries its own code signing identifier.
+
 ## [0.5.1] - 2026-11-05
 
 ### Changed
@@ -130,3 +165,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 - Permission and question answers from the card through the PermissionRequest hook.
 - Next prompt through the VS Code and Cursor companion extension, or the Claude Code inbox socket.
 - Sprites as JSON: palettes, outfits and an effects layer.
+
+[Unreleased]: https://github.com/forbee-dev/buddy/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/forbee-dev/buddy/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/forbee-dev/buddy/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/forbee-dev/buddy/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/forbee-dev/buddy/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/forbee-dev/buddy/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/forbee-dev/buddy/releases/tag/v0.1.0

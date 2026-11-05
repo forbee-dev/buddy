@@ -118,11 +118,13 @@ More detail in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Install
 
-You need macOS 14 or later.
+You need macOS 14 or later, on Apple silicon or Intel.
 
 **From a release (easiest).** Download `Buddy-<version>.dmg` from the [Releases](https://github.com/forbee-dev/buddy/releases) page. Drag Buddy to Applications.
 
-Buddy is not notarized yet. The first time you open it, macOS will block it. Go to System Settings, then Privacy & Security, and click **Open Anyway**.
+Buddy is not notarized. The first time you open it, macOS will block it. Go to System Settings, then Privacy & Security, and click **Open Anyway**.
+
+**Verify the download.** Compare the DMG hash with the one in the release notes: see [docs/INSTALL.md](docs/INSTALL.md#verify-the-download).
 
 **With Homebrew.**
 
@@ -153,12 +155,13 @@ On first launch, Buddy walks you through setup:
 
 Install hooks adds Buddy's hooks to `~/.claude/settings.json`. It makes a backup first. One click removes them again.
 
-Full steps and troubleshooting: [docs/INSTALL.md](docs/INSTALL.md).
+Full steps: [docs/INSTALL.md](docs/INSTALL.md). Something does not work: [Troubleshooting](docs/INSTALL.md#troubleshooting).
 
 ## Using it
 
 - **Menu bar.** The icon is an outline. It fills with a count dot when a session needs you, even while the buddies are hidden. The dropdown has Hide/Show buddies, a list of buddies (the ones that need you come first, each with thumbnail, project, state dot and app name), Settings, Welcome, Uninstall Buddy… and Quit.
 - **Arrangement.** Settings → General: Free (default), Stacked or Row. In Stacked and Row the buddies keep a fixed order with a gap, and dragging one moves the whole group. Not used in single-buddy mode.
+- **Session names.** A session named with `claude --name` or `/rename` shows that name on the tag instead of the folder.
 - **Pinning.** Drag a mascot to pin it. Right-click → Unpin to release it.
 - **Right-click menu.** Re-roll look, palette, outfit, Move to left/right edge, Jump and Hide.
 - **Modes.** One mascot per session (the default), or a single buddy with a badge and a session picker.
@@ -192,10 +195,10 @@ Accessibility: Buddy respects Reduce Motion (no walking, still frames) and Reduc
 
 When no sessions run, Buddy uses about 0% CPU. With only the sleeping buddy, idle is 0.0% CPU, because the sleep loop is a Core Animation animation. The hook adds about 4.5 ms per event.
 
-## What it can't do (yet)
+## Limits
 
 - **Cloud and VM sessions.** Claude Code cloud sessions and plain Claude Desktop chats can't be tracked. No hooks reach your Mac from them.
-- **Notarization.** The app is not notarized yet. That is why you need Open Anyway on first launch.
+- **Notarization.** The app is not notarized. That is why you need Open Anyway on first launch.
 - **The inbox socket.** It is an internal Claude Code mechanism. It could change in a future version and break the next-prompt route for Claude Desktop.
 - **Peer messages.** A next prompt sent through the inbox reaches Claude as a peer message, not as something you typed.
 - **Next prompt over SSH.** It is off. Buddy can't tell if claude is in the foreground on a remote host, so a prompt could run as a shell command. Answer in the terminal.
@@ -209,6 +212,7 @@ When no sessions run, Buddy uses about 0% CPU. With only the sleeping buddy, idl
 - It fails open. If Buddy is not running, Claude Code behaves as if Buddy was never there.
 - Nothing leaves your Mac. No network, no telemetry. Prompts, commands and tokens are not logged.
 - Hooks go into `~/.claude/settings.json` with a backup, and one click removes them.
+- The DMG is signed with a self-signed certificate, not a Developer ID, so macOS asks for Open Anyway.
 
 More in [docs/SECURITY.md](docs/SECURITY.md).
 

@@ -1,5 +1,9 @@
 # Security
 
+## Supported versions
+
+Only the latest release gets fixes.
+
 ## Trust model
 
 - Buddy is a local, single-user tool. The security boundary is the macOS user account.

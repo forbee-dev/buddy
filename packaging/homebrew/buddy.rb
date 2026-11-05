@@ -16,7 +16,13 @@ cask "buddy" do
     "~/Library/Preferences/com.tiagosantos.buddy.plist",
   ]
 
+  livecheck do
+    url :url
+    strategy :github_latest
+  end
+
   caveats <<~EOS
-    Buddy is not notarized yet. On first open, go to System Settings → Privacy & Security → Open Anyway.
+    The DMG is signed with a self-signed certificate and is not notarized.
+    On first open, go to System Settings → Privacy & Security → Open Anyway.
   EOS
 end

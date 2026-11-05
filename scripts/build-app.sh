@@ -7,8 +7,9 @@ cd "$ROOT"
 VERSION="$(tr -d '[:space:]' < VERSION)"
 BUILD_NUMBER="$(date +%Y%m%d%H%M)"
 
-swift build -c release
-BIN="$(swift build -c release --show-bin-path)"
+ARCHS=(--arch arm64 --arch x86_64)
+swift build -c release "${ARCHS[@]}"
+BIN="$(swift build -c release "${ARCHS[@]}" --show-bin-path)"
 
 # Icon: regenerate when the sprites or the icon script changed.
 ICNS="$ROOT/Resources/AppIcon.icns"
@@ -41,9 +42,14 @@ plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Inf
 plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
-# Companion extension (built by vscode-ext/, read only here).
-VSIX="$(ls -t "$ROOT"/vscode-ext/buddy-companion-*.vsix 2>/dev/null | head -1 || true)"
-if [ -n "$VSIX" ]; then cp "$VSIX" "$APP/Contents/Resources/"; echo "Bundled: $(basename "$VSIX")"; fi
+# Companion extension: the .vsix whose version matches vscode-ext/package.json.
+EXT_VERSION="$(node -p "require('./vscode-ext/package.json').version")"
+VSIX="$ROOT/vscode-ext/buddy-companion-$EXT_VERSION.vsix"
+if [ ! -f "$VSIX" ] && command -v npm >/dev/null; then (cd vscode-ext && npm ci && npm run package); fi
+if [ -f "$VSIX" ]; then cp "$VSIX" "$APP/Contents/Resources/"; echo "Bundled: $(basename "$VSIX")"
+elif [ "${BUDDY_ALLOW_NO_VSIX:-}" != 1 ]; then
+  echo "error: build the extension first (cd vscode-ext && npm ci && npm run package)" >&2; exit 1
+fi
 
 source "$ROOT/scripts/sign-identity.sh"
 # Hardened runtime on both. Only the app gets the Apple Events entitlement (Jump for iTerm2/Terminal).
