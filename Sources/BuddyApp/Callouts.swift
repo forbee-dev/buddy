@@ -38,6 +38,9 @@ final class AwayWatch {
         }
     }
 
+    /// True from screen sleep, a switched-out session, or idle past the away threshold until fresh input.
+    var isAway: Bool { since != nil }
+
     private func begin(_ start: Date, model: AppModel) {
         since = start
         model.clearLastDigest()

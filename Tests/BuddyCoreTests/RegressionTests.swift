@@ -175,3 +175,12 @@ private func fileHook(_ event: String, id: String = UUID().uuidString, path: Str
         #expect(!UninstallPlan.isSettingsBackup(".settings.buddy-tmp"))
     }
 }
+
+@Suite struct NotificationGateTests {
+    @Test func bannersOnlyWhenTheBuddyIsNotSeen() {
+        #expect(!NotificationGate.shouldPost(buddiesHidden: false, away: false, alsoWhenVisible: false))
+        #expect(NotificationGate.shouldPost(buddiesHidden: true, away: false, alsoWhenVisible: false))
+        #expect(NotificationGate.shouldPost(buddiesHidden: false, away: true, alsoWhenVisible: false))
+        #expect(NotificationGate.shouldPost(buddiesHidden: false, away: false, alsoWhenVisible: true))
+    }
+}

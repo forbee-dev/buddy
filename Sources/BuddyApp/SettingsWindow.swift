@@ -156,6 +156,8 @@ private struct NotificationsTab: View {
             Toggle("Claude needs permission", isOn: $model.notifyPermission)
             Toggle("Claude asks a question", isOn: $model.notifyQuestion)
             Toggle("Claude finishes", isOn: $model.notifyDone)
+            Toggle("Also while the buddies are on screen", isOn: $model.notifyWhileVisible)
+                .help("Off: banners only show while the buddies are hidden or you are away. The card and sound still work.")
             Toggle("A plan limit reaches 90%", isOn: $model.notifyPlanUsage)
                 .help("Needs Show plan usage in Settings → General. One notification per window, no sound.")
             Toggle("Allow answering from notifications", isOn: $model.notifyActions)

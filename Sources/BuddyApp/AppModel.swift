@@ -54,6 +54,7 @@ final class AppModel {
     var notifyPermission: Bool { didSet { defaults.set(notifyPermission, forKey: PrefKey.notifyPermission) } }
     var notifyQuestion: Bool { didSet { defaults.set(notifyQuestion, forKey: PrefKey.notifyQuestion) } }
     var notifyDone: Bool { didSet { defaults.set(notifyDone, forKey: PrefKey.notifyDone) } }
+    var notifyWhileVisible: Bool { didSet { defaults.set(notifyWhileVisible, forKey: PrefKey.notifyWhileVisible) } }
     var notifyActions: Bool { didSet { defaults.set(notifyActions, forKey: PrefKey.notifyActions) } }
     var notifyPlanUsage: Bool { didSet { defaults.set(notifyPlanUsage, forKey: PrefKey.notifyPlanUsage) } }
     /// Settings → General, off by default: installs the status line bridge (`buddy-hook statusline`) when on.
@@ -176,6 +177,7 @@ final class AppModel {
         notifyPermission = d.bool(PrefKey.notifyPermission, default: true)
         notifyQuestion = d.bool(PrefKey.notifyQuestion, default: true)
         notifyDone = d.bool(PrefKey.notifyDone, default: false)
+        notifyWhileVisible = d.bool(PrefKey.notifyWhileVisible, default: false)
         notifyActions = d.bool(PrefKey.notifyActions, default: true)
         notifyPlanUsage = d.bool(PrefKey.notifyPlanUsage, default: true)
         showPlanUsage = d.bool(forKey: PrefKey.showPlanUsage)

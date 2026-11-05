@@ -50,7 +50,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// True when a notification was posted.
     @discardableResult
     func post(for s: Session, model: AppModel, stillWaiting: Int? = nil) -> Bool {
-        guard !s.hidden else { return false }
+        guard !s.hidden,
+              NotificationGate.shouldPost(buddiesHidden: model.buddiesHidden, away: model.away.isAway, alsoWhenVisible: model.notifyWhileVisible)
+        else { return false }
         // The subagent label is model-written: marked, revealed, and clipped.
         let note = s.pending?.agentId.map { " " + NotificationActions.subagentNote(s.subagentLabel($0)) } ?? ""
         let tool = DisplayText.reveal(s.pending?.toolName ?? "A tool")
