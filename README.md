@@ -17,7 +17,7 @@
   <img alt="Works with Claude Code" src="https://img.shields.io/badge/works%20with-Claude%20Code-d97757">
 </p>
 
-<p align="center"><a href="docs/assets/buddy-demo.mp4"><img src="docs/assets/buddy-demo-poster.png" alt="Play the 44-second demo: Buddy shows each session's status over your other apps" width="760"></a><br><sub>▶ Watch the 44-second demo</sub></p>
+https://github.com/user-attachments/assets/d836d5f9-386c-427b-9908-9bacf4a00f30
 
 ## Why I built this
 
