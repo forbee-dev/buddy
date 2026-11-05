@@ -1,5 +1,7 @@
 # Contributing to Buddy
 
+Read the [Code of Conduct](CODE_OF_CONDUCT.md) before you contribute.
+
 Small pull requests are best. For a big change, open an issue first.
 
 ## Setup
