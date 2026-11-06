@@ -16,23 +16,52 @@ let appNames = HookTrust.releaseNames
 let closeWaitMs = 1000
 #endif
 
-func gatherEnv() -> HookEnv {
-    let e = ProcessInfo.processInfo.environment
-    let claudePid = e["CLAUDE_PID"].flatMap { Int32($0) } ?? getppid()
+let terminalKeys: Set<String> = ["TERM_PROGRAM", "__CFBundleIdentifier", "VSCODE_GIT_ASKPASS_MAIN", "ITERM_SESSION_ID", "TERM_SESSION_ID"]
+let claudeKeys: Set<String> = ["CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_ENTRYPOINT"]
+
+/// Reads only `keys`, not a copy of the whole environment.
+func ownEnv(_ keys: Set<String>) -> [String: String] {
+    var out: [String: String] = [:]
+    for k in keys { if let v = getenv(k) { out[k] = String(cString: v) } }
+    return out
+}
+
+/// `event` and `cwd`: the payload's. OpenCode runs plugins in a service without a tty; the routing (tty, terminal
+/// app) comes from the TUI. Only `OpenCodeTUI.routingEvents` pay for the process scan that finds it.
+func gatherEnv(event: String? = nil, cwd: String? = nil) -> HookEnv {
+    let own = ownEnv(["CLAUDE_PID", "BUDDY_AGENT"])
+    let host = own["CLAUDE_PID"].flatMap { Int32($0) } ?? getppid()
+    let openCode = own["BUDDY_AGENT"] == HookEnv.openCode
+    var claudePid = host
+    var term = ownEnv(terminalKeys)
+    if openCode {
+        let scan = event.map(OpenCodeTUI.routingEvents.contains) ?? false
+        let tui = scan ? OpenCodeTUI.find(host: host, cwd: cwd) : (ProcInfo.tty(of: host) != nil ? host : nil)
+        if let tui, tui != host {
+            claudePid = tui
+            term = ProcInfo.environment(of: tui, keys: terminalKeys) ?? [:]
+        } else if tui == nil {
+            // The service's environment names the app that started it, not the session's terminal.
+            term = [:]
+        }
+    }
+    let claude = openCode ? [:] : ownEnv(claudeKeys)
     let proc = ProcInfo.info(of: claudePid)
     return HookEnv(
         claudePid: claudePid,
         shellPid: proc?.ppid,
         tty: proc?.tty,
-        termProgram: e["TERM_PROGRAM"],
-        bundleId: e["__CFBundleIdentifier"],
-        askpassMain: e["VSCODE_GIT_ASKPASS_MAIN"],
-        itermSessionId: e["ITERM_SESSION_ID"],
-        termSessionId: e["TERM_SESSION_ID"],
-        messagingSocket: e["CLAUDE_CODE_MESSAGING_SOCKET"],
-        messagingToken: e["CLAUDE_CODE_MESSAGING_TOKEN"],
-        attended: e["CLAUDE_CODE_SESSION_ATTENDED"],
-        entrypoint: e["CLAUDE_CODE_ENTRYPOINT"])
+        termProgram: term["TERM_PROGRAM"],
+        bundleId: term["__CFBundleIdentifier"],
+        askpassMain: term["VSCODE_GIT_ASKPASS_MAIN"],
+        itermSessionId: term["ITERM_SESSION_ID"],
+        termSessionId: term["TERM_SESSION_ID"],
+        messagingSocket: claude["CLAUDE_CODE_MESSAGING_SOCKET"],
+        messagingToken: claude["CLAUDE_CODE_MESSAGING_TOKEN"],
+        attended: claude["CLAUDE_CODE_SESSION_ATTENDED"],
+        entrypoint: claude["CLAUDE_CODE_ENTRYPOINT"],
+        agent: openCode ? HookEnv.openCode : nil,
+        hostPid: openCode ? host : nil)
 }
 
 /// Debug builds with `BUDDY_SOCKET` (tests) check the user only.
@@ -49,7 +78,7 @@ func run() throws {
     guard trustedServer(fd) else { return }
     let payload = try HookPayload.decode(FileHandle.standardInput.readDataToEndOfFile())
     let wantsReply = payload["hook_event_name"]?.string == "PermissionRequest"
-    let msg = HookMessage(id: UUID().uuidString, wantsReply: wantsReply, payload: payload, env: gatherEnv())
+    let msg = HookMessage(id: UUID().uuidString, wantsReply: wantsReply, payload: payload, env: gatherEnv(event: payload["hook_event_name"]?.string, cwd: payload["cwd"]?.string))
     let line = try WireMessage.encode(msg)
     guard line.count <= wireMaxLine else { return }
     UnixSocket.setSendTimeout(fd, seconds: 1)

@@ -103,6 +103,7 @@ import Testing
                                         home: "/Users/me", appPath: "/Applications/Buddy.app")
         #expect(steps == [.removeHooks,
                           .restoreStatusLine,
+                          .removeOpenCodePlugin(path: "/Users/me/.config/opencode/plugins/buddy.js"),
                           .removeSettingsBackups(dir: "/Users/me/.claude"),
                           .uninstallExtension(editor: "VS Code", cli: "/usr/local/bin/code"),
                           .uninstallExtension(editor: "Cursor", cli: "/usr/local/bin/cursor"),
@@ -119,8 +120,8 @@ import Testing
 
     @Test func noEditorStillListsTheStep() {
         let steps = UninstallPlan.steps(editors: [], home: "/h", appPath: "/a/Buddy.app")
-        #expect(steps.count == 8)
-        #expect(steps[3] == .uninstallExtension(editor: "VS Code / Cursor", cli: nil))
+        #expect(steps.count == 9)
+        #expect(steps[4] == .uninstallExtension(editor: "VS Code / Cursor", cli: nil))
     }
 
     @Test func extensionListParsing() {

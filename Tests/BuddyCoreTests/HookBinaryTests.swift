@@ -185,4 +185,24 @@ struct HookBinaryTests {
         #expect(Date().timeIntervalSince(start) < 3)
         #expect(p.terminationStatus == 0)
     }
+
+    @Test(arguments: ["Stop", "SessionStart"]) func openCodeMarkerAndNoClaudeInbox(event: String) throws {
+        let path = Self.tempSocketPath()
+        let server = try UnixSocket.listen(path)
+        defer { close(server); unlink(path) }
+        let (p, _) = try run(stdin: #"{"session_id":"ses_a","hook_event_name":"\#(event)","cwd":"/nonexistent"}"#, socket: path,
+                             env: ["BUDDY_AGENT": "opencode", "CLAUDE_CODE_MESSAGING_SOCKET": "/tmp/cc-socks/1.sock", "TERM_PROGRAM": "iTerm.app"])
+        let conn = try acceptWithin3s(server)
+        let line = try UnixSocket.readLine(conn)
+        close(conn)
+        p.waitUntilExit()
+        guard let line, case .hook(let m) = try WireMessage.decode(line) else { Issue.record("no hook message"); return }
+        #expect(m.env.agent == HookEnv.openCode)
+        #expect(m.env.messagingSocket == nil)
+        // No TUI in that folder: the pid stays the plugin's process.
+        #expect(m.env.claudePid == getpid())
+        #expect(m.env.hostPid == getpid())
+        // A host without a tty (a service) gives no terminal fields; a host with one is the TUI itself.
+        #expect(m.env.termProgram == (ProcInfo.tty(of: getpid()) == nil ? nil : "iTerm.app"))
+    }
 }

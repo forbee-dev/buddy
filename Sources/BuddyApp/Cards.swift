@@ -126,7 +126,7 @@ struct PermissionCard: View {
             ContextLine(requestId: pending.id, draft: draft)
             if let d = pending.toolInput["description"]?.string {
                 Text(DisplayText.reveal(d)).font(.callout.weight(.medium)).fixedSize(horizontal: false, vertical: true)
-                    .accessibilityLabel("Claude says: \(DisplayText.reveal(d))")
+                    .accessibilityLabel("\(session.agentName) says: \(DisplayText.reveal(d))")
             }
             if risk == .writes { WarningText(text: "Changes files") }
             CodeBox(text: detail.text, lines: detail.lines, accent: risk.color, risk: risk.label)

@@ -110,9 +110,9 @@ struct BubbleView: View {
     }
 
     private func subtitle(_ s: Session) -> String {
-        let who = s.pending?.agentId.map { "\(s.subagentLabel($0)) (subagent)" } ?? "Claude"
+        let who = s.pending?.agentId.map { "\(s.subagentLabel($0)) (subagent)" } ?? s.agentName
         if let p = s.pending { return p.kind == .question ? "\(who) asks" : "\(who) wants to run \(DisplayText.reveal(p.toolName))" }
-        return s.state == .done ? "Claude finished" : "\(s.terminal.displayName) · \(s.state.label)"
+        return s.state == .done ? "\(s.agentName) finished" : "\(s.terminal.displayName) · \(s.state.label)"
     }
 }
 
@@ -278,7 +278,7 @@ struct StatusCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if session.state == .needsPermission || session.state == .asking {
-                Text("Claude is waiting in the terminal. Buddy has no card for this request.")
+                Text("\(session.agentName) is waiting in the terminal. Buddy has no card for this request.")
             }
             if session.state == .error, let e = session.lastError {
                 ScrollView {

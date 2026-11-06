@@ -22,16 +22,23 @@ public struct HookEnv: Codable, Sendable, Equatable, CustomStringConvertible {
     public var attended: String?
     /// `CLAUDE_CODE_ENTRYPOINT`, e.g. "cli", "sdk-cli", "claude-desktop" (sanitized, max 32 chars).
     public var entrypoint: String?
+    /// `HookEnv.openCode` for an OpenCode session; nil for Claude Code.
+    public var agent: String?
+    /// OpenCode: the process that runs the plugin (the service, or the TUI when there is no service).
+    public var hostPid: Int32?
+
+    public static let openCode = "opencode"
 
     public init(claudePid: Int32? = nil, shellPid: Int32? = nil, tty: String? = nil, termProgram: String? = nil,
                 bundleId: String? = nil, askpassMain: String? = nil, itermSessionId: String? = nil,
                 termSessionId: String? = nil, messagingSocket: String? = nil, messagingToken: String? = nil,
-                attended: String? = nil, entrypoint: String? = nil) {
+                attended: String? = nil, entrypoint: String? = nil, agent: String? = nil, hostPid: Int32? = nil) {
         self.claudePid = claudePid; self.shellPid = shellPid; self.tty = tty; self.termProgram = termProgram
         self.bundleId = bundleId; self.askpassMain = askpassMain; self.itermSessionId = itermSessionId
         self.termSessionId = termSessionId; self.messagingSocket = messagingSocket
         self.messagingToken = messagingToken; self.attended = attended
         self.entrypoint = entrypoint.map(HookEnv.sanitizeEntrypoint)
+        self.agent = agent; self.hostPid = hostPid
     }
 
     /// Keeps only [a-z0-9-_.], max 32 chars.

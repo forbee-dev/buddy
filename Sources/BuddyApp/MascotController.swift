@@ -306,7 +306,7 @@ final class MascotController {
             walkTarget = nil
             let wasOpen = bubble != nil
             showBubble(focus: false)
-            let who = p.agentId.map { "\(s.subagentLabel($0)) (subagent)" } ?? "Claude"
+            let who = p.agentId.map { "\(s.subagentLabel($0)) (subagent)" } ?? s.agentName
             if !wasOpen { Announcer.say("\(s.displayName): \(p.kind == .question ? "\(who) has a question" : "\(who) wants to run \(DisplayText.reveal(p.toolName))")") }
         } else if DoneAutoCard.shouldOpen(from: old, to: spec.state, hasPending: false, cardOpen: bubble != nil, hidden: model.buddiesHidden) {
             showBubble(focus: false)

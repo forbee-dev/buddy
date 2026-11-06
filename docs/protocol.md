@@ -62,10 +62,14 @@ Events: `SubagentStart` and `SubagentStop` (non-blocking), plus `PreToolUse` wit
 | `messagingToken` | `CLAUDE_CODE_MESSAGING_TOKEN` (secret: the app keeps it in memory only) |
 | `attended` | `CLAUDE_CODE_SESSION_ATTENDED` (`"1"` interactive, `"0"` headless) |
 | `entrypoint` | `CLAUDE_CODE_ENTRYPOINT`, sanitized to `[a-z0-9-_.]`, max 32 chars (`cli`, `sdk-cli`, `claude-desktop`) |
+| `agent` | `"opencode"` when `BUDDY_AGENT=opencode` (the OpenCode plugin); absent for Claude Code |
+| `hostPid` | OpenCode only: `CLAUDE_PID`, the process that runs the plugin. `claudePid` is then the TUI that `buddy-hook` finds for `SessionStart`, `UserPromptSubmit` and `PermissionRequest`, else `hostPid` with no terminal fields |
 
 Connection roles: the first message on a connection decides its role. A **hook** connection carries exactly one `hook` message (then only the reply). The app accepts it only when the peer process is the bundled `buddy-hook` and its parent or grandparent is `env.claudePid`. Otherwise the app closes the connection, and the hook exits 0 with no output.
 
 Routing fields (`claudePid`, `shellPid`, `tty`, `messagingSocket`, `messagingToken`, ...) are taken from `SessionStart`, or from the first event of a session the app has not seen. Later events that report a different `claudePid` for the same `session_id` are ignored. `messagingSocket` is used only if it is `/tmp/cc-socks/<claudePid>.sock` or `/tmp/cc-socks-<uid>/<claudePid>.sock` (the app's own uid).
+
+OpenCode sessions accept only OpenCode events, and Claude Code sessions only Claude Code events. An OpenCode event takes the routing fields when its `claudePid` is the same, the old pid is dead, or the old pid is its `hostPid`. Other events from the same `hostPid` keep the routing. After the session ends, only `SessionStart`, `UserPromptSubmit` and `PermissionRequest` bring it back. A session on a pid with no tty ends after 30 minutes without events.
 
 Non-blocking events (`wantsReply: false`): after it writes the line, the hook half-closes its side and waits (max 1 s) until the app closes the connection. The app closes it after it has handled the message. So the hook process is still alive when the app checks it.
 

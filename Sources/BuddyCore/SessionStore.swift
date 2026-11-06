@@ -89,13 +89,16 @@ public struct Session: Sendable, Identifiable {
     /// Look assignment key: the cwd, plus the host for a remote session.
     public var lookKey: String { remote.map { "\($0.host):\(cwd)" } ?? cwd }
     /// The claude process behind the session: a local pid, or the ssh client plus the remote pid.
+    /// None for OpenCode: one service or TUI pid holds many sessions.
     var processKey: String? {
-        guard let r = remote else { return env.claudePid.map { "pid-\($0)" } }
+        guard let r = remote else { return env.agent == nil ? env.claudePid.map { "pid-\($0)" } : nil }
         return r.claudePid.map { "ssh-\(r.sshPid)-\($0)" }
     }
     /// Set by the app when claude's parent chain runs under /Applications/Claude.app.
     public var underClaudeApp = false
     public var terminal: TerminalApp { underClaudeApp ? .claudeDesktop : TerminalApp.detect(env) }
+    /// The agent's name in the UI.
+    public var agentName: String { env.agent == HookEnv.openCode ? "OpenCode" : "Claude" }
     /// Where "Answer in ..." sends the user.
     public var answerPlace: String { terminal == .claudeDesktop ? "Claude Desktop" : "terminal" }
 }
@@ -115,6 +118,9 @@ public struct SessionStore: Sendable {
     public static let maxRemoteSessions = 8
     /// Sessions without a claude pid cannot be reaped by pid; they end after this much silence.
     public static let noPidTTL: TimeInterval = 3600
+    /// An OpenCode session bound to a pid with no tty (the service: no TUI found, or two in one folder) outlives its
+    /// terminal, because the service keeps running. After this much silence it ends; its next routing event revives it.
+    public static let openCodeNoTTYTTL: TimeInterval = 1800
     public static let compactingNote = "Compacting…"
     public private(set) var sessions: [String: Session] = [:]
     public init() {}
@@ -126,10 +132,12 @@ public struct SessionStore: Sendable {
         guard let sid = p["session_id"]?.string, let event = p["hook_event_name"]?.string else { return StoreChange() }
         var change = StoreChange(sessionId: sid)
         if event == "SessionStart" { rekey(to: sid, env: msg.env, origin: origin, change: &change) }
+        var setRouting = event == "SessionStart"
         if let existing = sessions[sid] {
             // Local events never touch a remote session, remote ones never a local one or another ssh connection's.
             guard existing.remote?.sshPid == origin?.sshPid,
-                  accepts(existing, event: event, pid: msg.env.claudePid, isAlive: isAlive) else { return StoreChange() }
+                  accepts(existing, event: event, env: msg.env, isAlive: isAlive) else { return StoreChange() }
+            if existing.env.agent != nil { setRouting = Self.openCodeMoves(existing, to: msg.env, isAlive: isAlive) }
         } else if sessions.count >= Self.maxSessions
                     || (origin != nil && sessions.values.filter { $0.remote != nil }.count >= Self.maxRemoteSessions) {
             return StoreChange()
@@ -142,7 +150,7 @@ public struct SessionStore: Sendable {
             if let t = p["transcript_path"]?.string { s.transcriptPath = t }
             if let t = p["session_title"]?.string { s.title = t }
         }
-        if event == "SessionStart" { s.env = Self.routingEnv(msg.env) }
+        if setRouting { s.env = Self.routingEnv(msg.env) }
         s.trackTools(event: event, p, now: now)
         if let agent { subagentEvent(&s, agent: agent, event: event, msg: msg, change: &change, now: now) }
         else { transition(&s, event: event, msg: msg, change: &change, now: now) }
@@ -152,11 +160,27 @@ public struct SessionStore: Sendable {
         return change
     }
 
-    /// Routing fields come from SessionStart only. A SessionStart from another claude pid may take over
-    /// only when the old pid is unknown, the same, or dead. Ended sessions accept only SessionStart.
-    private func accepts(_ s: Session, event: String, pid: Int32?, isAlive: (Int32) -> Bool) -> Bool {
-        guard let pid, let old = s.env.claudePid, old != pid else { return event == "SessionStart" || s.state != .ended }
+    /// A message never changes a session of another agent. Claude Code: routing fields come from SessionStart only.
+    /// A SessionStart from another claude pid may take over only when the old pid is unknown, the same, or dead.
+    /// Ended sessions accept only SessionStart. OpenCode: see `openCodeMoves`; its plugin host may also send
+    /// events without a TUI search, which keep the routing.
+    private func accepts(_ s: Session, event: String, env: HookEnv, isAlive: (Int32) -> Bool) -> Bool {
+        guard env.agent == s.env.agent else { return false }
+        if env.agent != nil {
+            // A straggler event after the end must not bring the buddy back; a new turn or a card does.
+            guard s.state != .ended || OpenCodeTUI.routingEvents.contains(event) else { return false }
+            return Self.openCodeMoves(s, to: env, isAlive: isAlive) || (env.hostPid != nil && env.hostPid == s.env.hostPid)
+        }
+        guard let pid = env.claudePid, let old = s.env.claudePid, old != pid else { return event == "SessionStart" || s.state != .ended }
         return event == "SessionStart" && !isAlive(old)
+    }
+
+    /// OpenCode ids are never reused, and a session can move to another TUI (a resume). Its routing follows the
+    /// message when it comes from the same pid, the old pid is dead, or the old pid is this message's plugin host
+    /// (the service pid, before the TUI was found).
+    static func openCodeMoves(_ s: Session, to env: HookEnv, isAlive: (Int32) -> Bool) -> Bool {
+        guard let old = s.env.claudePid, let pid = env.claudePid else { return true }
+        return pid == old || !isAlive(old) || old == env.hostPid
     }
 
     /// Main-session events only (no `agent_id`).
@@ -354,7 +378,9 @@ public struct SessionStore: Sendable {
         for (id, s) in sessions where s.state != .ended {
             // A remote session lives as long as the local ssh client that carries it.
             if let pid = s.remote?.sshPid ?? s.env.claudePid {
-                guard !isAlive(pid) else { continue }
+                let silentService = s.remote == nil && s.env.agent != nil && s.env.tty == nil && s.pending == nil
+                    && now.timeIntervalSince(s.updated) > Self.openCodeNoTTYTTL
+                guard !isAlive(pid) || silentService else { continue }
             } else {
                 guard now.timeIntervalSince(s.updated) > Self.noPidTTL else { continue }
             }

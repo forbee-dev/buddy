@@ -246,6 +246,20 @@ struct HooksSection: View {
             Text("Plan usage bridge: \(model.statusLineStatus.label)").font(.callout)
                 .help("Settings → General → Show plan usage installs or removes it.")
             Divider()
+            Text("OpenCode plugin: \(model.openCodeStatus.label)").font(.headline).accessibilityAddTraits(.isHeader)
+            Text("Shows a buddy for each OpenCode session. Buddy writes \(OpenCodeInstaller.fileName) to OpenCode's plugins folder.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if model.openCodeStatus == .outdated { WarningText(text: "The OpenCode plugin is from another Buddy version: click Install OpenCode plugin.") }
+            if model.openCodeStatus == .foreign {
+                WarningText(text: "Another \(OpenCodeInstaller.fileName) is in OpenCode's plugins folder. Buddy does not change it.")
+            }
+            HStack {
+                Button("Install OpenCode plugin") { model.installOpenCode(true) }
+                    .disabled([.current, .foreign].contains(model.openCodeStatus) || !services.isInApplications)
+                Button("Uninstall OpenCode plugin") { model.installOpenCode(false) }
+                    .disabled([.missing, .foreign].contains(model.openCodeStatus))
+            }
+            Divider()
             Text("VS Code / Cursor extension").font(.headline).accessibilityAddTraits(.isHeader)
             Text("Lets Buddy type your next prompt into the right editor terminal.").font(.callout).foregroundStyle(.secondary)
             if services.bundledExtension == nil {
@@ -263,6 +277,12 @@ struct HooksSection: View {
             if let m = services.message { Text(m).font(.caption).fixedSize(horizontal: false, vertical: true) }
         }
         .onAppear { model.refreshHookStatus() }
+    }
+}
+
+extension OpenCodeInstaller.Status {
+    var label: String {
+        switch self { case .current: "installed"; case .missing: "not installed"; case .outdated: "outdated"; case .foreign: "not Buddy's file" }
     }
 }
 

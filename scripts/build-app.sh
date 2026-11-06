@@ -38,6 +38,9 @@ cp "$ROOT"/Resources/sounds/*.wav "$APP/Contents/Resources/sounds/"
 # SSH sessions: Settings → SSH copies an install command that reads remote/install.sh.
 mkdir -p "$APP/Contents/Resources/remote"
 cp "$ROOT"/scripts/remote/{buddy-hook-remote,install.sh,uninstall.sh} "$APP/Contents/Resources/remote/"
+# OpenCode: Settings → Hooks & Extension writes this plugin, with the hook path filled in.
+mkdir -p "$APP/Contents/Resources/opencode"
+cp "$ROOT/opencode-plugin/buddy.js" "$APP/Contents/Resources/opencode/"
 plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist" >/dev/null

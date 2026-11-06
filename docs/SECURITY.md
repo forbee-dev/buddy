@@ -24,7 +24,8 @@ Only the latest release gets fixes.
 - **Hook → app**: `buddy-hook` checks the listener before it sends. The peer uid must match, and the peer process (`LOCAL_PEERPID`, `proc_pidpath`) must be the `Buddy` binary next to the hook. Release builds ignore `BUDDY_SOCKET`.
 - **App → hook**: the first message decides the role of a connection. A hook connection carries one hook message only. The peer must be the bundled `buddy-hook`, and its parent or grandparent must be the claude pid that the message names.
 - **Status line bridge** (`buddy-hook statusline`, opt-in): the hook forwards only the `rate_limits` object of the status line JSON (never the model, cwd, cost, or transcript path), with the same peer rule as a hook; the user's previous status line command runs unchanged, with the same stdin, from `/bin/sh -c`. The app never logs the numbers, and the diagnostics report leaves them out.
-- **Routing fields** (claude pid, shell pid, tty, inbox socket, token) come from `SessionStart` only. A later `SessionStart` from another claude pid can take over only when the old process is dead.
+- **OpenCode hook**: the parent or grandparent of the peer must be the plugin host that the message names (`hostPid`). The session pid must be that host, or a TUI of it: the host has no tty, and the TUI has a tty, runs the same binary, and has the payload's cwd as its current folder.
+- **Routing fields** (claude pid, shell pid, tty, inbox socket, token) come from `SessionStart` only. A later `SessionStart` from another claude pid can take over only when the old process is dead. A message never changes a session of the other agent (Claude Code or OpenCode). OpenCode routing moves only to a pid of the same plugin host, or when the old pid is dead.
 - **Inbox socket**: only `/tmp/cc-socks/<claude pid>.sock`. Before each send, Buddy checks with `lstat` that it is a real socket owned by the user, in a folder that others cannot write (or that has the sticky bit).
 - **Extension**: only terminals whose shell runs under the extension's own editor process count.
 
@@ -56,6 +57,10 @@ Off by default. Details and setup: [SSH.md](SSH.md).
 - Buddy never types keystrokes into a terminal. The next prompt goes through the companion extension or the session inbox socket.
 - Unattended sessions (`claude -p`) are never held: Buddy defers them at once.
 - The away digest takes keyboard focus when you come back. Esc closes it. It cannot answer a request.
+
+## OpenCode service password
+
+OpenCode's background service writes its local URL and password to `service.json`. The plugin needs them only to send a question answer, because the plugin API has no form reply. The plugin reads the file only when its `pid` is the plugin's own process. It uses the URL only when it is `http` on a loopback address (`127.0.0.1`, `localhost`, `[::1]`). The password goes only in the `Authorization` header of that one request. The plugin never sends the password to Buddy and never logs it or the URL. A failed reply logs only the HTTP status.
 
 ## What is logged
 

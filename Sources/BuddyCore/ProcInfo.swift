@@ -62,3 +62,58 @@ extension ProcInfo {
         return Status(pgid: info.kp_eproc.e_pgid, tpgid: info.kp_eproc.e_tpgid, stopped: Int32(info.kp_proc.p_stat) == SSTOP)
     }
 }
+
+extension ProcInfo {
+    public static func allPids() -> [Int32] {
+        let n = proc_listallpids(nil, 0)
+        guard n > 0 else { return [] }
+        // Room for processes that start between the two calls.
+        var pids = [Int32](repeating: 0, count: Int(n) + 64)
+        let got = pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32($0.count)) }
+        return got > 0 ? pids.prefix(Int(got)).filter { $0 > 0 } : []
+    }
+
+    /// Current directory; nil when the process is gone or belongs to another user.
+    public static func cwd(of pid: Int32) -> String? {
+        var info = proc_vnodepathinfo()
+        let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
+        let path = withUnsafeBytes(of: info.pvi_cdir.vip_path) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+        return path.isEmpty ? nil : path
+    }
+
+    /// The `keys` of the environment the process started with; nil when the kernel does not give it (another user's process).
+    public static func environment(of pid: Int32, keys: Set<String>) -> [String: String]? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size = 0
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return nil }
+        var buf = [UInt8](repeating: 0, count: size)
+        guard sysctl(&mib, 3, &buf, &size, nil, 0) == 0 else { return nil }
+        return parseEnvironment(Array(buf.prefix(size)), keys: keys)
+    }
+
+    /// KERN_PROCARGS2 layout: argc (Int32), the exec path, NUL padding, argc arguments, then KEY=VALUE strings up to an empty one.
+    static func parseEnvironment(_ buf: [UInt8], keys: Set<String>) -> [String: String]? {
+        guard buf.count >= 4 else { return nil }
+        let argc = buf.withUnsafeBytes { $0.loadUnaligned(as: Int32.self) }
+        var i = 4
+        func next() -> String? {
+            guard i < buf.count else { return nil }
+            let start = i
+            while i < buf.count, buf[i] != 0 { i += 1 }
+            defer { i += 1 }
+            return String(decoding: buf[start..<i], as: UTF8.self)
+        }
+        _ = next()
+        while i < buf.count, buf[i] == 0 { i += 1 }
+        for _ in 0..<max(argc, 0) {
+            guard next() != nil else { return nil }
+        }
+        var env: [String: String] = [:]
+        while let s = next(), !s.isEmpty {
+            guard let eq = s.firstIndex(of: "="), keys.contains(String(s[..<eq])) else { continue }
+            env[String(s[..<eq])] = String(s[s.index(after: eq)...])
+        }
+        return env
+    }
+}

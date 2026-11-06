@@ -22,6 +22,7 @@ final class AppModel {
     var hooksOutdated = false
     /// settings.json has a shape Install refuses to change.
     var hooksInvalid = false
+    var openCodeStatus: OpenCodeInstaller.Status = .missing
     private(set) var editorsConnected: [String] = []
     /// Connected extensions (editor, version), one per editor window. For Diagnostics.
     var extClients: [(editor: String, version: String)] = []
@@ -448,7 +449,12 @@ final class AppModel {
     }
 
     /// The peer must be the bundled buddy-hook, a child (or grandchild) of the claude pid it reports.
-    private func hookPeerAllowed(_ conn: Connection, _ h: HookMessage) -> Bool { hookPeerAllowed(conn, claudePid: h.env.claudePid) }
+    /// OpenCode: a child of the plugin host it reports; the session pid is that host or a TUI of it in the payload's cwd.
+    private func hookPeerAllowed(_ conn: Connection, _ h: HookMessage) -> Bool {
+        guard h.env.agent == HookEnv.openCode else { return hookPeerAllowed(conn, claudePid: h.env.claudePid) }
+        guard let host = h.env.hostPid, let pid = h.env.claudePid, hookPeerAllowed(conn, claudePid: host) else { return false }
+        return pid == host || OpenCodeTUI.isTUI(pid, of: host, cwd: h.payload["cwd"]?.string)
+    }
 
     private func hookPeerAllowed(_ conn: Connection, claudePid: Int32?) -> Bool {
         guard let pid = conn.peerPid, let expected = expectedHookPath else { return false }
@@ -509,7 +515,7 @@ final class AppModel {
 
     /// Marks a session whose claude runs under /Applications/Claude.app (Desktop without the env markers).
     private func checkClaudeApp(_ sid: String) {
-        guard let pid = store.sessions[sid]?.env.claudePid else { return }
+        guard let env = store.sessions[sid]?.env, env.agent == nil, let pid = env.claudePid else { return }
         store.setUnderClaudeApp(sid, Self.underClaudeApp(pid))
         if let v = ClaudeVersion.fromExecutable(PeerCheck.path(of: pid)) { claudeVersions.insert(v) } else { claudeVersionUnknown = true }
     }

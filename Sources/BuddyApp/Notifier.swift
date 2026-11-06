@@ -64,10 +64,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             body = note.isEmpty ? "\(tool) needs your permission." : "A subagent wants to run \(tool).\(note)"
             if s.pending?.kind == .permission { category = Self.permissionCategory }
         case .asking where model.notifyQuestion:
-            body = note.isEmpty ? "Claude has a question for you." : "A subagent has a question for you.\(note)"
+            body = note.isEmpty ? "\(s.agentName) has a question for you." : "A subagent has a question for you.\(note)"
             if s.pending?.kind == .question { category = Self.questionCategory }
         case .done where model.notifyDone:
-            body = "Claude finished."
+            body = "\(s.agentName) finished."
             id = "buddy-done-\(s.id)"
             if model.route(for: s) != .none { category = Self.doneCategory }
         default:

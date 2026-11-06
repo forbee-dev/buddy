@@ -8,7 +8,7 @@ import BuddyCore
 @Observable
 final class UninstallRun {
     let steps = UninstallPlan.steps(editors: AppServices.shared.editorCLIs.map { (name: $0.0, cli: $0.1) },
-                                    home: NSHomeDirectory(), appPath: Bundle.main.bundlePath)
+                                    home: NSHomeDirectory(), appPath: Bundle.main.bundlePath, env: ProcessInfo.processInfo.environment)
     var results: [Int: (ok: Bool, text: String)] = [:]
     var running = false
     var finished = false
@@ -70,6 +70,16 @@ final class UninstallRun {
                                                          previousURL: model.previousStatusLineURL) {
                 case .unchanged: return (true, "No Buddy status line was installed.")
                 case .written(let backup): return (true, "Restored." + AppModel.backupNote(backup))
+                }
+            } catch {
+                return (false, "\(error)")
+            }
+        case .removeOpenCodePlugin(let path):
+            defer { model.refreshHookStatus() }
+            do {
+                switch try OpenCodeInstaller.remove(url: URL(fileURLWithPath: path)) {
+                case .unchanged: return (true, "No Buddy OpenCode plugin was installed.")
+                case .written: return (true, "Removed.")
                 }
             } catch {
                 return (false, "\(error)")

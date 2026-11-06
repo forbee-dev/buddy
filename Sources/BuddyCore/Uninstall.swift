@@ -4,6 +4,8 @@ public enum UninstallStep: Equatable, Sendable {
     case removeHooks
     /// Puts the user's own `statusLine` back, or removes the key when Buddy added it.
     case restoreStatusLine
+    /// Only Buddy's own `buddy.js`; other OpenCode plugins stay.
+    case removeOpenCodePlugin(path: String)
     /// The `settings.json.buddy-backup-*` files next to settings.json: they can hold API keys.
     case removeSettingsBackups(dir: String)
     /// `cli` nil: no `code` or `cursor` command was found.
@@ -19,6 +21,7 @@ public enum UninstallStep: Equatable, Sendable {
         switch self {
         case .removeHooks: "Remove Buddy's hooks from ~/.claude/settings.json (with a backup)"
         case .restoreStatusLine: "Restore the previous status line in ~/.claude/settings.json"
+        case .removeOpenCodePlugin: "Remove Buddy's OpenCode plugin (\(OpenCodeInstaller.fileName))"
         case .removeSettingsBackups: "Delete Buddy's settings.json backups from ~/.claude (they can hold API keys)"
         case .uninstallExtension(let editor, _): "Uninstall the companion extension from \(editor)"
         case .unregisterLoginItem: "Turn off Start at login"
@@ -34,12 +37,13 @@ public enum UninstallPlan {
 
     public static func supportFolder(home: String) -> String { home + "/Library/Application Support/Buddy" }
 
-    /// The steps in order, with one extension step per editor command found.
-    public static func steps(editors: [(name: String, cli: String)], home: String, appPath: String) -> [UninstallStep] {
+    /// The steps in order, with one extension step per editor command found. `env` locates OpenCode's config folder.
+    public static func steps(editors: [(name: String, cli: String)], home: String, appPath: String, env: [String: String] = [:]) -> [UninstallStep] {
         let ext = editors.isEmpty ? [UninstallStep.uninstallExtension(editor: "VS Code / Cursor", cli: nil)]
             : editors.map { UninstallStep.uninstallExtension(editor: $0.name, cli: $0.cli) }
-        return [.removeHooks, .restoreStatusLine, .removeSettingsBackups(dir: home + "/.claude")] + ext + [.unregisterLoginItem, .removeRemoteToken, .removeSupportFolder(path: supportFolder(home: home)),
-                                      .quitAndReveal(appPath: appPath)]
+        return [.removeHooks, .restoreStatusLine, .removeOpenCodePlugin(path: OpenCodeInstaller.pluginURL(env: env, home: home).path),
+                .removeSettingsBackups(dir: home + "/.claude")] + ext
+            + [.unregisterLoginItem, .removeRemoteToken, .removeSupportFolder(path: supportFolder(home: home)), .quitAndReveal(appPath: appPath)]
     }
 
     /// A backup file name as `HookInstaller.writeBackup` makes it.

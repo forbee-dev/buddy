@@ -5,6 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 
 ## [Unreleased]
 
+### Added
+- OpenCode 2 support: one buddy for each OpenCode session, with working, done and error states, Jump to its terminal, and permission and question cards. Settings → Hooks & Extension → **Install OpenCode plugin** writes `buddy.js` to OpenCode's plugins folder. **Uninstall Buddy…** removes it. Plan usage, token cost and Next prompt stay Claude Code only.
+
 ### Fixed
 - Jump raises the existing Cursor or VS Code window of a multi-root workspace. It no longer opens a new window. Install companion extension 0.1.5 for saved `.code-workspace` files.
 

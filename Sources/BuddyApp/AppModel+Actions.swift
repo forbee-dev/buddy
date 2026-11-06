@@ -6,7 +6,7 @@ extension AppModel {
 
     /// Claude Desktop sessions use the inbox only: never the editor route, never keystrokes.
     func route(for s: Session) -> PromptRoute {
-        if s.remote != nil { return .none }
+        if s.remote != nil || s.env.agent != nil { return .none }
         #if DEBUG
         if Demo.on { return s.terminal == .claudeDesktop ? .inbox : .editor(s.terminal.displayName) }
         #endif
@@ -117,6 +117,33 @@ extension AppModel {
         hooksOutdated = status == .outdated
         hooksInvalid = status == .invalid
         statusLineStatus = HookInstaller.statusLineStatus(settingsURL: settingsURL, home: NSHomeDirectory())
+        openCodeStatus = OpenCodeInstaller.status(url: openCodePluginURL, template: openCodeTemplate, hookPath: hookPath)
+    }
+
+    // MARK: OpenCode plugin
+
+    var openCodePluginURL: URL { OpenCodeInstaller.pluginURL(env: ProcessInfo.processInfo.environment, home: NSHomeDirectory()) }
+    var openCodeTemplate: String? {
+        AppServices.bundledResource("buddy", ext: "js", subdirectory: "opencode", devPath: "opencode-plugin/buddy.js")
+            .flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+    }
+
+    func installOpenCode(_ install: Bool) {
+        guard !install || canInstallHooks else { installMessage = "buddy-hook not found. Run Buddy from Buddy.app."; return }
+        guard !install || AppServices.shared.isInApplications else { installMessage = "Move Buddy to Applications first."; return }
+        do {
+            let r = install ? try OpenCodeInstaller.install(url: openCodePluginURL, template: openCodeTemplate, hookPath: hookPath)
+                            : try OpenCodeInstaller.remove(url: openCodePluginURL)
+            switch r {
+            case .unchanged: installMessage = install ? "OpenCode plugin already installed." : "No Buddy OpenCode plugin to remove."
+            case .written: installMessage = (install ? "OpenCode plugin installed." : "OpenCode plugin removed.")
+                + " Run `opencode service restart` or restart OpenCode."
+            }
+        } catch {
+            installMessage = "\(error)"
+            log.error("OpenCode plugin install failed: \(String(describing: error), privacy: .public)")
+        }
+        refreshHookStatus()
     }
 
     var previousStatusLineURL: URL { HookInstaller.previousStatusLineURL(home: NSHomeDirectory()) }

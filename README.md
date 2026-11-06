@@ -87,7 +87,8 @@ Jump focuses the right terminal tab or editor window. For Claude Desktop, Jump b
 - **Plan usage (opt-in).** Settings → General → **Show plan usage** adds a chip "5h 23% · 7d 41%" next to the tokens: the 5-hour and 7-day limits of your claude.ai plan, orange from 80% and red from 95%, with one notification when a window passes 90%. Buddy reads them through a status line bridge in `~/.claude/settings.json` (`buddy-hook statusline`); your own status line command keeps working. Pro, Max and Ultra logins only, and terminal sessions only: API keys, Bedrock, Vertex, the VS Code panel and Claude Desktop send no limits.
 - **SSH sessions (opt-in).** Show Claude Code sessions that run on another host, through `ssh -R`. Setup and limits: [docs/SSH.md](docs/SSH.md).
 - **Diagnostics.** Settings → Diagnostics shows status rows, the last 50 hook events, and a redacted report you can copy into an issue.
-- **Uninstall.** Menu → **Uninstall Buddy…** lists each step and changes nothing until you click. It removes hooks, the extension, the login item and the data folder.
+- **OpenCode (opt-in).** A buddy for each OpenCode 2 session too. See [OpenCode](#opencode).
+- **Uninstall.** Menu → **Uninstall Buddy…** lists each step and changes nothing until you click. It removes hooks, the OpenCode plugin, the extension, the login item and the data folder.
 
 ## How it works
 
@@ -198,6 +199,27 @@ Accessibility: Buddy respects Reduce Motion (no walking, still frames) and Reduc
 
 When no sessions run, Buddy uses about 0% CPU. With only the sleeping buddy, idle is 0.0% CPU, because the sleep loop is a Core Animation animation. The hook adds about 4.5 ms per event.
 
+## OpenCode
+
+Buddy also shows a buddy for each [OpenCode](https://opencode.ai) 2 session. OpenCode 1 is not supported.
+
+1. Settings → Hooks & Extension → **Install OpenCode plugin**. Buddy writes `buddy.js` to `~/.config/opencode/plugins/`. It uses `$OPENCODE_CONFIG_DIR` or `$XDG_CONFIG_HOME` when Buddy sees them. Buddy never changes other plugins.
+2. Run `opencode service restart`, or restart OpenCode, to load the plugin.
+
+What works:
+
+- Working, done, error and compacting states, and subagent minis for OpenCode subagent sessions.
+- Jump to the terminal of the session.
+- The permission card: Allow, Deny (with a reason) and Always allow. Always allow shows only when OpenCode can save a rule.
+- The question card for OpenCode's question tool. The answer goes through the local API of OpenCode's background service.
+- The first answer wins. When you answer in OpenCode, the Buddy card closes.
+
+Limits:
+
+- Plan usage, tokens and cost, and Next prompt are Claude Code only.
+- OpenCode runs plugins in a background service. Buddy finds the session's terminal through the OpenCode process that runs in the project folder. With two OpenCode terminals in one folder, Jump cannot tell them apart, and the buddy ends after 30 minutes without events. Its next prompt brings it back.
+- With `opencode --standalone`, or on another channel than `latest`, answer questions in OpenCode. Permissions still work from the card.
+
 ## Limits
 
 - **Cloud and VM sessions.** Claude Code cloud sessions and plain Claude Desktop chats can't be tracked. No hooks reach your Mac from them.
@@ -235,6 +257,7 @@ There may be a bee somewhere.
 Sources/BuddyCore    logic you can unit test
 Sources/BuddyApp     the macOS app
 Sources/buddy-hook   the CLI that each hook runs
+opencode-plugin/     the OpenCode plugin that Buddy installs (JavaScript)
 Tests/               tests
 vscode-ext/          companion extension for VS Code and Cursor (TypeScript)
 Resources/           Info.plist, prices.json, chiptune sounds
