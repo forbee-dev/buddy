@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-06
+
 ### Added
 - OpenCode 2 support: one buddy for each OpenCode session, with working, done and error states, Jump to its terminal, and permission and question cards. Settings → Hooks & Extension → **Install OpenCode plugin** writes `buddy.js` to OpenCode's plugins folder. **Uninstall Buddy…** removes it. Plan usage, token cost and Next prompt stay Claude Code only.
 
@@ -180,7 +182,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 - Next prompt through the VS Code and Cursor companion extension, or the Claude Code inbox socket.
 - Sprites as JSON: palettes, outfits and an effects layer.
 
-[Unreleased]: https://github.com/forbee-dev/buddy/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/forbee-dev/buddy/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/forbee-dev/buddy/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/forbee-dev/buddy/compare/v0.5.1...v1.0.0
 [0.5.1]: https://github.com/forbee-dev/buddy/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/forbee-dev/buddy/compare/v0.4.0...v0.5.0
